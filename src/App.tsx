@@ -123,6 +123,11 @@ interface EventDraft {
   title: string;
 }
 
+interface BucketDraft {
+  status: BucketStatus;
+  text: string;
+}
+
 interface MannerReviewDraft {
   improvements: string;
   rating: MannerRating;
@@ -151,6 +156,15 @@ const PROFILE_META: Record<
 > = {
   boyfriend: { emoji: '👨', label: '남자친구', displayName: '태준씌' },
   girlfriend: { emoji: '👩', label: '여자친구', displayName: '영주씌' },
+};
+
+const CALENDAR_EVENT_TONES: Record<
+  AccountProfile | 'shared',
+  { bg: string; border: string; label: string; text: string }
+> = {
+  boyfriend: { bg: '#eaf3ff', border: '#bfdbfe', label: '태준씌', text: '#2563eb' },
+  girlfriend: { bg: '#fff1f2', border: '#fecdd3', label: '영주씌', text: '#e11d48' },
+  shared: { bg: '#f3e8ff', border: '#ddd6fe', label: '공통 태그', text: '#7e22ce' },
 };
 
 const BUCKET_FILTER_LABELS: Record<BucketFilter, string> = {
@@ -193,6 +207,11 @@ const EMPTY_EVENT_DRAFT: EventDraft = {
   importance: 3,
   memo: '',
   participantProfiles: [],
+};
+
+const EMPTY_BUCKET_DRAFT: BucketDraft = {
+  text: '',
+  status: 'pending',
 };
 
 const EMPTY_MANNER_REVIEW_DRAFT: MannerReviewDraft = {
@@ -253,6 +272,26 @@ function getEventParticipantProfiles(event: CalendarEvent) {
   }
 
   return event.authorProfile ? [event.authorProfile] : [];
+}
+
+function getCalendarEventTone(event: CalendarEvent) {
+  const participants = getEventParticipantProfiles(event);
+
+  if (participants.includes('boyfriend') && participants.includes('girlfriend')) {
+    return CALENDAR_EVENT_TONES.shared;
+  }
+
+  if (participants.includes('boyfriend')) {
+    return CALENDAR_EVENT_TONES.boyfriend;
+  }
+
+  if (participants.includes('girlfriend')) {
+    return CALENDAR_EVENT_TONES.girlfriend;
+  }
+
+  return event.authorProfile
+    ? CALENDAR_EVENT_TONES[event.authorProfile]
+    : CALENDAR_EVENT_TONES.shared;
 }
 
 function buildDefaultEvents(accounts: Account[]): CalendarEvent[] {
@@ -516,11 +555,13 @@ export default function App() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [newEvent, setNewEvent] = useState<EventDraft>(EMPTY_EVENT_DRAFT);
+  const [bucketDraft, setBucketDraft] = useState<BucketDraft>(EMPTY_BUCKET_DRAFT);
   const [mannerReviewDraft, setMannerReviewDraft] = useState<MannerReviewDraft>(
     EMPTY_MANNER_REVIEW_DRAFT,
   );
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+  const [isBucketModalOpen, setIsBucketModalOpen] = useState(false);
   const [isMannerModalOpen, setIsMannerModalOpen] = useState(false);
   const [isWeatherPopupOpen, setIsWeatherPopupOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
@@ -598,6 +639,7 @@ export default function App() {
       setWeatherError(null);
       setLocationError(null);
       setEditingEventId(null);
+      setIsBucketModalOpen(false);
       setIsMannerModalOpen(false);
       setMannerReviewError(null);
       setEvents([]);
@@ -857,6 +899,16 @@ export default function App() {
     setIsAddModalOpen(false);
     setEditingEventId(null);
     setNewEvent(EMPTY_EVENT_DRAFT);
+  }
+
+  function openBucketModal() {
+    setBucketDraft(EMPTY_BUCKET_DRAFT);
+    setIsBucketModalOpen(true);
+  }
+
+  function closeBucketModal() {
+    setIsBucketModalOpen(false);
+    setBucketDraft(EMPTY_BUCKET_DRAFT);
   }
 
   function openMannerReviewModal() {
@@ -1200,6 +1252,36 @@ export default function App() {
     );
   }
 
+  async function addBucketItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const text = bucketDraft.text.trim();
+    if (!text || !session) {
+      return;
+    }
+
+    const client = getRemoteClient();
+    if (!client) {
+      return;
+    }
+
+    const nextItem: BucketItem = {
+      id: Date.now(),
+      text,
+      status: bucketDraft.status,
+    };
+    const { error } = await client.from('bucket_items').insert(toBucketItemRow(nextItem));
+
+    if (error) {
+      setDataError(getRemoteErrorMessage(error));
+      return;
+    }
+
+    setBucketList((previousItems) => [nextItem, ...previousItems]);
+    setBucketFilter(nextItem.status);
+    closeBucketModal();
+  }
+
   function renderMannerProfile(profile: AccountProfile) {
     const profileMeta = PROFILE_META[profile];
     const isCurrentProfile = currentAccount?.profile === profile;
@@ -1517,32 +1599,73 @@ export default function App() {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
     const startDay = firstDayOfMonth(year, month);
+    const currentMonthDays = daysInMonth(year, month);
+    const selectedDateKey = formatYMD(selectedDate);
+    const todayKey = formatYMD(new Date());
+    const visibleCellCount = Math.max(35, Math.ceil((startDay + currentMonthDays) / 7) * 7);
 
-    for (let index = 0; index < startDay; index += 1) {
-      days.push(<div key={`empty-${index}`} />);
-    }
-
-    for (let day = 1; day <= daysInMonth(year, month); day += 1) {
-      const dateObject = new Date(year, month, day);
+    for (let index = 0; index < visibleCellCount; index += 1) {
+      const dateObject = new Date(year, month, 1 - startDay + index);
       const dateKey = formatYMD(dateObject);
-      const isSelected = dateKey === formatYMD(selectedDate);
-      const isToday = dateKey === formatYMD(new Date());
-      const hasEvent = events.some((event) => event.date === dateKey);
+      const day = dateObject.getDate();
+      const isCurrentMonth = dateObject.getMonth() === month;
+      const isSelected = dateKey === selectedDateKey;
+      const isToday = dateKey === todayKey;
+      const dateEvents = events
+        .filter((event) => event.date === dateKey)
+        .sort((left, right) => left.time.localeCompare(right.time));
 
       days.push(
         <button
           key={dateKey}
           onClick={() => setSelectedDate(dateObject)}
-          className={`relative h-12 rounded-2xl transition ${
+          className={`min-h-[104px] px-1.5 py-2 text-left transition ${
             isSelected
-              ? 'bg-blue-500 text-white shadow-[0_12px_24px_rgba(59,130,246,0.25)]'
-              : 'hover:bg-[#fff7ec]'
-          } ${isToday && !isSelected ? 'border border-[#f1d8b5]' : ''}`}
+              ? 'bg-blue-50 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.2)]'
+              : 'hover:bg-[#fffaf4]'
+          } ${index >= 7 ? 'border-t border-[#f3eadf]' : ''} ${
+            index % 7 === 0 ? '' : 'border-l border-[#f7efe5]'
+          } ${!isCurrentMonth ? 'text-gray-300' : 'text-[#2f2417]'}`}
         >
-          <div className="flex h-full flex-col items-center justify-center">
-            <span className="text-sm font-semibold">{day}</span>
-            {hasEvent && !isSelected ? (
-              <span className="mt-1 h-1.5 w-1.5 rounded-full bg-blue-400" />
+          <div className="flex items-center justify-center">
+            <span
+              className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-black ${
+                isSelected
+                  ? 'bg-blue-500 text-white'
+                  : isToday
+                    ? 'bg-[#2f2417] text-white'
+                    : isCurrentMonth
+                      ? 'text-[#2f2417]'
+                      : 'text-gray-300'
+              }`}
+            >
+              {day}
+            </span>
+          </div>
+
+          <div className="mt-2 space-y-1">
+            {dateEvents.slice(0, 3).map((event) => {
+              const tone = getCalendarEventTone(event);
+
+              return (
+                <span
+                  key={event.id}
+                  className="block w-full truncate rounded-md border px-1.5 py-1 text-[9px] font-black leading-none shadow-sm"
+                  style={{
+                    backgroundColor: tone.bg,
+                    borderColor: tone.border,
+                    color: tone.text,
+                  }}
+                  title={`${event.time} ${event.title}`}
+                >
+                  {event.time} {event.title}
+                </span>
+              );
+            })}
+            {dateEvents.length > 3 ? (
+              <span className="block truncate rounded-md bg-[#f7f1e8] px-1.5 py-1 text-[9px] font-black leading-none text-[#9d7b52]">
+                +{dateEvents.length - 3}개
+              </span>
             ) : null}
           </div>
         </button>,
@@ -1780,9 +1903,31 @@ export default function App() {
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-7 gap-y-1">{calendarDays}</div>
+                  <div className="mb-3 flex flex-wrap gap-2 px-1">
+                    {(['boyfriend', 'girlfriend', 'shared'] as const).map((toneKey) => {
+                      const tone = CALENDAR_EVENT_TONES[toneKey];
 
-                  <div className="mt-10 px-2">
+                      return (
+                        <span
+                          key={toneKey}
+                          className="rounded-full border px-2 py-1 text-[10px] font-black"
+                          style={{
+                            backgroundColor: tone.bg,
+                            borderColor: tone.border,
+                            color: tone.text,
+                          }}
+                        >
+                          {tone.label}
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  <div className="grid grid-cols-7 overflow-hidden rounded-[22px] border border-[#f1e6d8] bg-white">
+                    {calendarDays}
+                  </div>
+
+                  <div className="mt-8 px-2">
                     <div className="mb-4 flex items-center justify-between">
                       <div>
                         <h3 className="text-lg font-bold text-[#2f2417]">
@@ -1965,9 +2110,9 @@ export default function App() {
           {activeTab !== 'manner' ? (
             <button
               type="button"
-              onClick={openAddModal}
+              onClick={activeTab === 'calendar' ? openAddModal : openBucketModal}
               className="absolute bottom-[5.75rem] left-1/2 z-20 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-2xl bg-blue-500 text-white shadow-[0_16px_32px_rgba(59,130,246,0.32)]"
-              aria-label="일정 추가"
+              aria-label={activeTab === 'calendar' ? '일정 추가' : '버킷리스트 추가'}
             >
               <Plus size={26} />
             </button>
@@ -2134,6 +2279,76 @@ export default function App() {
                   </button>
                 </div>
               </div>
+            </div>
+          ) : null}
+
+          {isBucketModalOpen ? (
+            <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/20 backdrop-blur-sm">
+              <form className="w-full rounded-t-[32px] bg-white p-8" onSubmit={addBucketItem}>
+                <div className="mb-6 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-bold text-[#2f2417]">버킷리스트 추가</h3>
+                    <p className="mt-1 text-sm text-[#8d7558]">함께하고 싶은 일을 하나씩 쌓아두세요.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeBucketModal}
+                    className="rounded-full bg-gray-100 p-2"
+                    aria-label="닫기"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <input
+                    type="text"
+                    placeholder="예: 겨울 바다 보러 가기"
+                    value={bucketDraft.text}
+                    onChange={(event) =>
+                      setBucketDraft((previousDraft) => ({
+                        ...previousDraft,
+                        text: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-2xl bg-gray-50 px-4 py-4 outline-none"
+                    autoFocus
+                  />
+
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['pending', 'ready', 'completed'] as BucketStatus[]).map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        onClick={() =>
+                          setBucketDraft((previousDraft) => ({
+                            ...previousDraft,
+                            status,
+                          }))
+                        }
+                        className={`rounded-2xl px-3 py-3 text-xs font-black transition ${
+                          bucketDraft.status === status
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-[#fff5e8] text-[#7b6142]'
+                        }`}
+                      >
+                        {status === 'completed'
+                          ? '완료'
+                          : status === 'ready'
+                            ? '준비중'
+                            : '미완료'}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full rounded-2xl bg-blue-500 py-4 font-bold text-white"
+                  >
+                    추가 완료
+                  </button>
+                </div>
+              </form>
             </div>
           ) : null}
 
