@@ -1,6 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import {
-  BadgeCheck,
   Calendar as CalendarIcon,
   Check,
   CheckCircle2,
@@ -140,7 +139,6 @@ interface MannerReviewDraft {
 const LOCATION_STORAGE_KEY = 'dating:location';
 const MANNER_BASE_TEMPERATURE = 36.5;
 const MANNER_RATING_STEP = 0.35;
-const MANNER_IMPROVEMENT_BONUS = 0.4;
 const MANNER_MIN_TEMPERATURE = 30;
 const MANNER_MAX_TEMPERATURE = 45;
 const CALENDAR_CELL_TITLE_MAX_LENGTH = 18;
@@ -189,9 +187,9 @@ const BUCKET_FILTER_LABELS: Record<BucketFilter, string> = {
 };
 
 const MANNER_STATUS_LABELS: Record<MannerReviewStatus, string> = {
-  open: '개선 대기',
-  requested: '확인 대기',
-  improved: '개선 완료',
+  open: '기록 완료',
+  requested: '기록 완료',
+  improved: '기록 완료',
 };
 
 const MANNER_RATING_LABELS: Record<MannerRating, string> = {
@@ -582,8 +580,7 @@ function calculateMannerTemperature(profile: AccountProfile, reviews: MannerRevi
   const rawTemperature = reviews
     .filter((review) => review.targetProfile === profile)
     .reduce((temperature, review) => {
-      const improvementBonus = review.status === 'improved' ? MANNER_IMPROVEMENT_BONUS : 0;
-      return temperature + getRatingTemperatureDelta(review.rating) + improvementBonus;
+      return temperature + getRatingTemperatureDelta(review.rating);
     }, MANNER_BASE_TEMPERATURE);
 
   return Number(clampTemperature(rawTemperature).toFixed(1));
@@ -1130,15 +1127,14 @@ export default function App() {
 
     const targetProfile = getPartnerProfile(currentAccount.profile);
     const strengths = mannerReviewDraft.strengths.trim();
-    const improvements = mannerReviewDraft.improvements.trim();
 
-    if (!strengths || !improvements) {
-      setMannerReviewError('장점과 개선할 점을 모두 입력해 주세요.');
+    if (!strengths) {
+      setMannerReviewError('장점을 입력해 주세요.');
       return;
     }
 
     if (targetProfile === currentAccount.profile) {
-      setMannerReviewError('자기 자신에게는 매너온도를 남길 수 없습니다.');
+      setMannerReviewError('자기 자신에게는 러브온도를 남길 수 없습니다.');
       return;
     }
 
@@ -1148,7 +1144,7 @@ export default function App() {
       targetProfile,
       rating: mannerReviewDraft.rating,
       strengths,
-      improvements,
+      improvements: '',
       status: 'open',
       createdAt: new Date().toISOString(),
     };
@@ -1330,96 +1326,6 @@ export default function App() {
     setEvents((previousEvents) => previousEvents.filter((event) => event.id !== eventId));
   }
 
-  async function requestMannerImprovement(reviewId: number) {
-    if (!currentAccount) {
-      return;
-    }
-
-    const client = getRemoteClient();
-    if (!client) {
-      return;
-    }
-
-    const requestedAt = new Date().toISOString();
-    const { error } = await client
-      .from('manner_reviews')
-      .update({
-        status: 'requested',
-        improvement_requested_at: requestedAt,
-      })
-      .eq('id', reviewId)
-      .eq('target_profile', currentAccount.profile)
-      .eq('status', 'open');
-
-    if (error) {
-      setDataError(getRemoteErrorMessage(error));
-      return;
-    }
-
-    setMannerReviews((previousReviews) =>
-      previousReviews.map((review) => {
-        if (
-          review.id !== reviewId ||
-          review.targetProfile !== currentAccount.profile ||
-          review.status !== 'open'
-        ) {
-          return review;
-        }
-
-        return {
-          ...review,
-          status: 'requested',
-          improvementRequestedAt: requestedAt,
-        };
-      }),
-    );
-  }
-
-  async function confirmMannerImprovement(reviewId: number) {
-    if (!currentAccount) {
-      return;
-    }
-
-    const client = getRemoteClient();
-    if (!client) {
-      return;
-    }
-
-    const confirmedAt = new Date().toISOString();
-    const { error } = await client
-      .from('manner_reviews')
-      .update({
-        status: 'improved',
-        improvement_confirmed_at: confirmedAt,
-      })
-      .eq('id', reviewId)
-      .eq('author_profile', currentAccount.profile)
-      .eq('status', 'requested');
-
-    if (error) {
-      setDataError(getRemoteErrorMessage(error));
-      return;
-    }
-
-    setMannerReviews((previousReviews) =>
-      previousReviews.map((review) => {
-        if (
-          review.id !== reviewId ||
-          review.authorProfile !== currentAccount.profile ||
-          review.status !== 'requested'
-        ) {
-          return review;
-        }
-
-        return {
-          ...review,
-          status: 'improved',
-          improvementConfirmedAt: confirmedAt,
-        };
-      }),
-    );
-  }
-
   async function toggleBucketStatus(itemId: number) {
     const client = getRemoteClient();
     if (!client) {
@@ -1513,8 +1419,7 @@ export default function App() {
               profileReviews.length
             ).toFixed(1),
           );
-    const requestedCount = profileReviews.filter((review) => review.status === 'requested').length;
-    const improvedCount = profileReviews.filter((review) => review.status === 'improved').length;
+    const highRatingCount = profileReviews.filter((review) => review.rating >= 4).length;
     const temperatureColor = temperature < MANNER_BASE_TEMPERATURE ? '#918679' : profileTone.bg;
     const temperatureOpacity = temperature >= MANNER_BASE_TEMPERATURE + 1 ? 0.82 : 0.68;
 
@@ -1547,7 +1452,7 @@ export default function App() {
                 </span>
               </div>
               <p className="mt-1 text-xs text-[#8d7558]">
-                {profileMeta.label}에게 남겨진 매너 기록
+                {profileMeta.label}에게 남겨진 러브 기록
               </p>
             </div>
           </div>
@@ -1593,9 +1498,9 @@ export default function App() {
             <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#E89B9B]">
               <TrendingUp size={14} />
             </div>
-            <p className="text-[10px] font-bold text-[#9d7b52]">개선 완료</p>
+            <p className="text-[10px] font-bold text-[#9d7b52]">좋은 평가</p>
             <p className="mt-1 text-sm font-black text-[#2f2417]">
-              {improvedCount}개
+              {highRatingCount}개
             </p>
           </div>
         </div>
@@ -1607,12 +1512,8 @@ export default function App() {
             className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#A594F9] px-4 py-3 text-sm font-bold text-white"
           >
             <Star size={15} fill="currentColor" />
-            {profileMeta.displayName} 매너온도 남기기
+            {profileMeta.displayName} 러브온도 남기기
           </button>
-        ) : requestedCount > 0 ? (
-          <div className="mt-5 rounded-2xl bg-[#F0EDFF] px-4 py-3 text-xs font-semibold text-[#7D6DE0]">
-            상대방 확인을 기다리는 개선 요청이 {requestedCount}개 있습니다.
-          </div>
         ) : null}
 
         <div className="mt-5">
@@ -1625,14 +1526,7 @@ export default function App() {
             <div>
               {recentReviews.map((review) => {
                 const authorMeta = PROFILE_META[review.authorProfile];
-                const reviewDelta =
-                  getRatingTemperatureDelta(review.rating) +
-                  (review.status === 'improved' ? MANNER_IMPROVEMENT_BONUS : 0);
-                const canRequestImprovement =
-                  currentAccount?.profile === review.targetProfile && review.status === 'open';
-                const canConfirmImprovement =
-                  currentAccount?.profile === review.authorProfile &&
-                  review.status === 'requested';
+                const reviewDelta = getRatingTemperatureDelta(review.rating);
 
                 return (
                   <div
@@ -1675,45 +1569,14 @@ export default function App() {
                         <span className="mr-2 font-bold text-[#6F99C7]">장점</span>
                         {review.strengths}
                       </p>
-                      <p className="text-[#6f5b43]">
-                        <span className="mr-2 font-bold text-[#D48787]">개선점</span>
-                        {review.improvements}
-                      </p>
                     </div>
-
-                    {review.status === 'improved' ? (
-                      <div className="mt-3 flex items-center gap-1.5 text-xs font-bold text-[#6F99C7]">
-                        <BadgeCheck size={14} />
-                        개선 확인 완료 · {MANNER_IMPROVEMENT_BONUS.toFixed(1)}°C 반영
-                      </div>
-                    ) : null}
-
-                    {canRequestImprovement ? (
-                      <button
-                        type="button"
-                        onClick={() => requestMannerImprovement(review.id)}
-                        className="mt-3 rounded-full bg-[#F8F5EF] px-3 py-1.5 text-xs font-bold text-[#8D7558]"
-                      >
-                        개선 완료 요청
-                      </button>
-                    ) : null}
-
-                    {canConfirmImprovement ? (
-                      <button
-                        type="button"
-                        onClick={() => confirmMannerImprovement(review.id)}
-                        className="mt-3 rounded-full bg-[#A594F9] px-3 py-1.5 text-xs font-bold text-white"
-                      >
-                        개선 확인하고 온도 올리기
-                      </button>
-                    ) : null}
                   </div>
                 );
               })}
             </div>
           ) : (
             <div className="mt-3 rounded-2xl border-2 border-dashed border-[#f0e3d0] bg-[#fffaf4] py-8 text-center text-sm text-[#a0896d]">
-              아직 남겨진 매너 기록이 없습니다.
+              아직 남겨진 러브 기록이 없습니다.
             </div>
           )}
         </div>
@@ -2336,11 +2199,11 @@ export default function App() {
                 <div className="mb-6 flex items-end justify-between gap-4">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#9d7b52]">
-                      Manner Temperature
+                      Love Temperature
                     </p>
-                    <h2 className="mt-1 text-2xl font-bold text-[#2f2417]">매너온도</h2>
+                    <h2 className="mt-1 text-2xl font-bold text-[#2f2417]">러브온도</h2>
                     <p className="mt-2 text-sm leading-6 text-[#8d7558]">
-                      상대방에게만 평점과 디테일을 남길 수 있고, 개선 확인이 끝나면 온도가 올라갑니다.
+                      상대방에게만 평점과 좋은 점을 남길 수 있고, 기록이 쌓일수록 온도가 달라집니다.
                     </p>
                   </div>
                   <button
@@ -2758,7 +2621,7 @@ export default function App() {
               <form className="w-full rounded-t-[32px] bg-white p-8" onSubmit={submitMannerReview}>
                 <div className="mb-6 flex items-center justify-between">
                   <div>
-                    <h3 className="text-xl font-bold text-[#2f2417]">매너온도 남기기</h3>
+                    <h3 className="text-xl font-bold text-[#2f2417]">러브온도 남기기</h3>
                     {currentPartnerProfile ? (
                       <p className="mt-1 text-sm text-[#8d7558]">
                         {PROFILE_META[currentPartnerProfile].emoji}{' '}
@@ -2827,23 +2690,6 @@ export default function App() {
                         setMannerReviewDraft((previousDraft) => ({
                           ...previousDraft,
                           strengths: event.target.value,
-                        }))
-                      }
-                      className="min-h-[92px] w-full rounded-2xl bg-gray-50 px-4 py-4 outline-none"
-                    />
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-[#9d7b52]">
-                      개선점
-                    </span>
-                    <textarea
-                      placeholder="다음에 더 좋아지면 좋을 점을 적어주세요."
-                      value={mannerReviewDraft.improvements}
-                      onChange={(event) =>
-                        setMannerReviewDraft((previousDraft) => ({
-                          ...previousDraft,
-                          improvements: event.target.value,
                         }))
                       }
                       className="min-h-[92px] w-full rounded-2xl bg-gray-50 px-4 py-4 outline-none"

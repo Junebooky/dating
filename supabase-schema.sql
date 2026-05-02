@@ -37,7 +37,7 @@ create table if not exists public.manner_reviews (
   target_profile text not null check (target_profile in ('boyfriend', 'girlfriend')),
   rating smallint not null check (rating in (1, 2, 3, 4, 5)),
   strengths text not null,
-  improvements text not null,
+  improvements text not null default '',
   status text not null default 'open' check (status in ('open', 'requested', 'improved')),
   created_at timestamptz not null default now(),
   improvement_requested_at timestamptz,
