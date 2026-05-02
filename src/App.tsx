@@ -46,6 +46,7 @@ interface CalendarEvent {
   authorProfile?: AccountProfile;
   authorUsername?: string;
   date: string;
+  endDate: string;
   id: number;
   importance: 1 | 2 | 3;
   memo: string;
@@ -88,6 +89,7 @@ interface CalendarEventRow {
   author_profile?: string | null;
   author_username?: string | null;
   date?: string | null;
+  end_date?: string | null;
   id?: number | null;
   importance?: number | null;
   memo?: string | null;
@@ -116,6 +118,7 @@ interface MannerReviewRow {
 }
 
 interface EventDraft {
+  endDate: string;
   importance: 1 | 2 | 3;
   memo: string;
   participantProfiles: AccountProfile[];
@@ -140,14 +143,16 @@ const MANNER_RATING_STEP = 0.35;
 const MANNER_IMPROVEMENT_BONUS = 0.4;
 const MANNER_MIN_TEMPERATURE = 30;
 const MANNER_MAX_TEMPERATURE = 45;
+const CALENDAR_CELL_TITLE_MAX_LENGTH = 18;
+const EVENT_MEMO_META_PREFIX = '__dear_days_event_meta__';
 
 const IMPORTANCE_COLORS: Record<
   CalendarEvent['importance'],
   { bg: string; label: string; text: string }
 > = {
-  1: { bg: '#FEE2E2', text: '#EF4444', label: '매우 중요' },
-  2: { bg: '#FFEDD5', text: '#F97316', label: '중요' },
-  3: { bg: '#DBEAFE', text: '#3B82F6', label: '보통' },
+  1: { bg: '#FBEFEF', text: '#D48787', label: '매우 중요' },
+  2: { bg: '#F8F5EF', text: '#9A8F82', label: '중요' },
+  3: { bg: '#EEF4FB', text: '#6F99C7', label: '보통' },
 };
 
 const PROFILE_META: Record<
@@ -160,11 +165,20 @@ const PROFILE_META: Record<
 
 const CALENDAR_EVENT_TONES: Record<
   AccountProfile | 'shared',
-  { bg: string; border: string; label: string; text: string }
+  { bg: string; label: string; text: string }
 > = {
-  boyfriend: { bg: '#eaf3ff', border: '#bfdbfe', label: '태준씌', text: '#2563eb' },
-  girlfriend: { bg: '#fff1f2', border: '#fecdd3', label: '영주씌', text: '#e11d48' },
-  shared: { bg: '#f3e8ff', border: '#ddd6fe', label: '공통 태그', text: '#7e22ce' },
+  boyfriend: { bg: '#7DA8D8', label: '태준씌', text: '#ffffff' },
+  girlfriend: { bg: '#E89B9B', label: '영주씌', text: '#ffffff' },
+  shared: { bg: '#A594F9', label: '공통 태그', text: '#ffffff' },
+};
+
+const BUCKET_STATUS_TONES: Record<
+  BucketStatus,
+  { bg: string; label: string; text: string }
+> = {
+  pending: { bg: '#F4F1EC', label: '미완료', text: '#918679' },
+  ready: { bg: '#EEF4FB', label: '준비중', text: '#6F99C7' },
+  completed: { bg: '#FBEFEF', label: '완료', text: '#D48787' },
 };
 
 const BUCKET_FILTER_LABELS: Record<BucketFilter, string> = {
@@ -204,6 +218,7 @@ const DEFAULT_ACCOUNTS: Account[] = [
 const EMPTY_EVENT_DRAFT: EventDraft = {
   title: '',
   time: '12:00',
+  endDate: '',
   importance: 3,
   memo: '',
   participantProfiles: [],
@@ -274,6 +289,38 @@ function getEventParticipantProfiles(event: CalendarEvent) {
   return event.authorProfile ? [event.authorProfile] : [];
 }
 
+function normalizeEventEndDate(startDate: string, endDate?: string | null) {
+  return typeof endDate === 'string' && endDate >= startDate ? endDate : startDate;
+}
+
+function isDateInEventRange(event: CalendarEvent, dateKey: string) {
+  const endDate = normalizeEventEndDate(event.date, event.endDate);
+  return event.date <= dateKey && dateKey <= endDate;
+}
+
+function doesEventIntersectDateRange(event: CalendarEvent, rangeStart: string, rangeEnd: string) {
+  const endDate = normalizeEventEndDate(event.date, event.endDate);
+  return event.date <= rangeEnd && endDate >= rangeStart;
+}
+
+function getCalendarRangeSegment(event: CalendarEvent, dateKey: string) {
+  const endDate = normalizeEventEndDate(event.date, event.endDate);
+
+  if (event.date === endDate) {
+    return 'single';
+  }
+
+  if (dateKey === event.date) {
+    return 'start';
+  }
+
+  if (dateKey === endDate) {
+    return 'end';
+  }
+
+  return 'middle';
+}
+
 function getCalendarEventTone(event: CalendarEvent) {
   const participants = getEventParticipantProfiles(event);
 
@@ -294,6 +341,60 @@ function getCalendarEventTone(event: CalendarEvent) {
     : CALENDAR_EVENT_TONES.shared;
 }
 
+function truncateMiddle(value: string, maxLength = CALENDAR_CELL_TITLE_MAX_LENGTH) {
+  const text = value.trim();
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  const visibleLength = Math.max(3, maxLength - 1);
+  const frontLength = Math.ceil(visibleLength * 0.62);
+  const backLength = visibleLength - frontLength;
+
+  return `${text.slice(0, frontLength)}…${text.slice(text.length - backLength)}`;
+}
+
+function decodeEventMemo(rawMemo?: string | null) {
+  const memo = typeof rawMemo === 'string' ? rawMemo : '';
+
+  if (!memo.startsWith(EVENT_MEMO_META_PREFIX)) {
+    return { memo };
+  }
+
+  const lineBreakIndex = memo.indexOf('\n');
+  const metaLine = lineBreakIndex >= 0 ? memo.slice(0, lineBreakIndex) : memo;
+  const visibleMemo = lineBreakIndex >= 0 ? memo.slice(lineBreakIndex + 1) : '';
+
+  try {
+    const parsed = JSON.parse(metaLine.slice(EVENT_MEMO_META_PREFIX.length));
+    return {
+      endDate: typeof parsed.endDate === 'string' ? parsed.endDate : undefined,
+      memo: visibleMemo,
+    };
+  } catch {
+    return { memo };
+  }
+}
+
+function encodeEventMemo(event: CalendarEvent) {
+  const endDate = normalizeEventEndDate(event.date, event.endDate);
+
+  if (endDate === event.date) {
+    return event.memo;
+  }
+
+  return `${EVENT_MEMO_META_PREFIX}${JSON.stringify({ endDate })}\n${event.memo}`;
+}
+
+function isMissingEndDateColumnError(error: { message?: string } | null) {
+  if (!error?.message) {
+    return false;
+  }
+
+  return error.message.includes('end_date') && error.message.includes('column');
+}
+
 function buildDefaultEvents(accounts: Account[]): CalendarEvent[] {
   const today = new Date();
   const year = today.getFullYear();
@@ -305,6 +406,7 @@ function buildDefaultEvents(accounts: Account[]): CalendarEvent[] {
     {
       id: 1,
       date: formatYMD(new Date(year, month, Math.min(today.getDate() + 1, 28))),
+      endDate: formatYMD(new Date(year, month, Math.min(today.getDate() + 1, 28))),
       time: '18:30',
       title: '저녁 데이트',
       importance: 2,
@@ -316,6 +418,7 @@ function buildDefaultEvents(accounts: Account[]): CalendarEvent[] {
     {
       id: 2,
       date: formatYMD(new Date(year, month, Math.min(today.getDate() + 4, 28))),
+      endDate: formatYMD(new Date(year, month, Math.min(today.getDate() + 4, 28))),
       time: '20:00',
       title: '영화 보기',
       importance: 3,
@@ -327,6 +430,7 @@ function buildDefaultEvents(accounts: Account[]): CalendarEvent[] {
     {
       id: 3,
       date: formatYMD(new Date(year, month, Math.min(today.getDate() + 7, 28))),
+      endDate: formatYMD(new Date(year, month, Math.min(today.getDate() + 9, 28))),
       time: '11:00',
       title: '브런치 & 산책',
       importance: 1,
@@ -358,35 +462,48 @@ function normalizeCalendarEventRow(row: CalendarEventRow, index: number): Calend
     : authorProfile
       ? [authorProfile]
       : [];
+  const date = typeof row.date === 'string' ? row.date : formatYMD(new Date());
+  const decodedMemo = decodeEventMemo(row.memo);
 
   return {
     id: typeof row.id === 'number' ? row.id : index + 1,
-    date: typeof row.date === 'string' ? row.date : formatYMD(new Date()),
+    date,
+    endDate: normalizeEventEndDate(
+      date,
+      typeof row.end_date === 'string' ? row.end_date : decodedMemo.endDate,
+    ),
     time: typeof row.time === 'string' ? row.time : '12:00',
     title: typeof row.title === 'string' ? row.title : '제목 없음',
     importance:
       row.importance === 1 || row.importance === 2 || row.importance === 3
         ? row.importance
         : 3,
-    memo: typeof row.memo === 'string' ? row.memo : '',
+    memo: decodedMemo.memo,
     authorUsername: typeof row.author_username === 'string' ? row.author_username : undefined,
     authorProfile,
     participantProfiles,
   };
 }
 
-function toCalendarEventRow(event: CalendarEvent) {
-  return {
+function toCalendarEventRow(event: CalendarEvent, includeEndDate = true) {
+  const row: CalendarEventRow = {
     id: event.id,
     date: event.date,
+    end_date: normalizeEventEndDate(event.date, event.endDate),
     time: event.time,
     title: event.title,
     importance: event.importance,
-    memo: event.memo,
+    memo: includeEndDate ? event.memo : encodeEventMemo(event),
     author_username: event.authorUsername ?? null,
     author_profile: event.authorProfile ?? null,
     participant_profiles: getEventParticipantProfiles(event),
   };
+
+  if (!includeEndDate) {
+    delete row.end_date;
+  }
+
+  return row;
 }
 
 function normalizeBucketItemRow(row: BucketItemRow, index: number): BucketItem {
@@ -492,6 +609,11 @@ function formatReviewDate(timestamp: string) {
   }).format(new Date(timestamp));
 }
 
+function formatCalendarDateLabel(dateKey: string) {
+  const [, month, day] = dateKey.split('-');
+  return `${Number(month)}월 ${Number(day)}일`;
+}
+
 function renderRatingStars(rating: MannerRating, size = 13) {
   return (
     <span className="flex items-center gap-0.5" aria-label={`${rating}점`}>
@@ -499,7 +621,7 @@ function renderRatingStars(rating: MannerRating, size = 13) {
         <Star
           key={starRating}
           size={size}
-          className={starRating <= rating ? 'text-amber-400' : 'text-gray-200'}
+          className={starRating <= rating ? 'text-[#A594F9]' : 'text-gray-200'}
           fill={starRating <= rating ? 'currentColor' : 'none'}
         />
       ))}
@@ -702,19 +824,53 @@ export default function App() {
   }, [location, session]);
 
   const selectedDateEvents = useMemo(() => {
+    const selectedDateKey = formatYMD(selectedDate);
+
     return events
-      .filter((event) => event.date === formatYMD(selectedDate))
+      .filter((event) => isDateInEventRange(event, selectedDateKey))
       .sort((left, right) => left.time.localeCompare(right.time));
   }, [events, selectedDate]);
 
   const monthEvents = useMemo(() => {
-    const monthKey = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(
-      2,
-      '0',
-    )}`;
+    const monthStart = formatYMD(
+      new Date(currentDate.getFullYear(), currentDate.getMonth(), 1),
+    );
+    const monthEnd = formatYMD(
+      new Date(
+        currentDate.getFullYear(),
+        currentDate.getMonth(),
+        daysInMonth(currentDate.getFullYear(), currentDate.getMonth()),
+      ),
+    );
 
-    return events.filter((event) => event.date.startsWith(monthKey));
+    return events.filter((event) => doesEventIntersectDateRange(event, monthStart, monthEnd));
   }, [currentDate, events]);
+
+  const upcomingEvents = useMemo(() => {
+    const todayKey = formatYMD(new Date());
+    const currentProfile = findAccountByUsername(accounts, session?.username)?.profile;
+
+    if (!currentProfile) {
+      return [];
+    }
+
+    return events
+      .filter((event) => {
+        const participants = getEventParticipantProfiles(event);
+
+        return (
+          normalizeEventEndDate(event.date, event.endDate) >= todayKey &&
+          participants.includes(currentProfile)
+        );
+      })
+      .sort((left, right) => {
+        const leftNextDate = left.date < todayKey ? todayKey : left.date;
+        const rightNextDate = right.date < todayKey ? todayKey : right.date;
+
+        return leftNextDate.localeCompare(rightNextDate) || left.time.localeCompare(right.time);
+      })
+      .slice(0, 5);
+  }, [accounts, events, session?.username]);
 
   const bucketStats = useMemo(() => {
     const total = bucketList.length;
@@ -743,6 +899,8 @@ export default function App() {
   const currentMannerTemperature = currentAccount
     ? calculateMannerTemperature(currentAccount.profile, mannerReviews)
     : null;
+  const editingEvent = editingEventId == null ? null : events.find((event) => event.id === editingEventId);
+  const eventModalStartDate = editingEvent?.date ?? formatYMD(selectedDate);
 
   useEffect(() => {
     if (!session || !currentAccount) {
@@ -810,6 +968,43 @@ export default function App() {
       : message || 'Supabase 요청에 실패했습니다.';
   }
 
+  async function insertCalendarEvent(client: NonNullable<typeof supabase>, event: CalendarEvent) {
+    const result = await client.from('calendar_events').insert(toCalendarEventRow(event));
+
+    if (!isMissingEndDateColumnError(result.error)) {
+      return result;
+    }
+
+    return client.from('calendar_events').insert(toCalendarEventRow(event, false));
+  }
+
+  async function upsertCalendarEvent(client: NonNullable<typeof supabase>, event: CalendarEvent) {
+    const result = await client.from('calendar_events').upsert(toCalendarEventRow(event));
+
+    if (!isMissingEndDateColumnError(result.error)) {
+      return result;
+    }
+
+    return client.from('calendar_events').upsert(toCalendarEventRow(event, false));
+  }
+
+  async function upsertCalendarEvents(
+    client: NonNullable<typeof supabase>,
+    nextEvents: CalendarEvent[],
+  ) {
+    const result = await client
+      .from('calendar_events')
+      .upsert(nextEvents.map((event) => toCalendarEventRow(event)));
+
+    if (!isMissingEndDateColumnError(result.error)) {
+      return result;
+    }
+
+    return client
+      .from('calendar_events')
+      .upsert(nextEvents.map((event) => toCalendarEventRow(event, false)));
+  }
+
   async function loadRemoteData() {
     const client = getRemoteClient();
 
@@ -843,9 +1038,7 @@ export default function App() {
 
     if (nextEvents.length === 0) {
       const defaultEvents = buildDefaultEvents(accounts);
-      const { error } = await client
-        .from('calendar_events')
-        .upsert(defaultEvents.map(toCalendarEventRow));
+      const { error } = await upsertCalendarEvents(client, defaultEvents);
 
       if (error) {
         setDataError(getRemoteErrorMessage(error));
@@ -889,6 +1082,7 @@ export default function App() {
   function openAddModal() {
     setNewEvent({
       ...EMPTY_EVENT_DRAFT,
+      endDate: formatYMD(selectedDate),
       participantProfiles: currentAccount ? [currentAccount.profile] : [],
     });
     setEditingEventId(null);
@@ -992,6 +1186,7 @@ export default function App() {
     setNewEvent({
       title: event.title,
       time: event.time,
+      endDate: normalizeEventEndDate(event.date, event.endDate),
       importance: event.importance,
       memo: event.memo,
       participantProfiles: getEventParticipantProfiles(event),
@@ -1070,11 +1265,12 @@ export default function App() {
         ...targetEvent,
         title: newEvent.title.trim(),
         time: newEvent.time,
+        endDate: normalizeEventEndDate(targetEvent.date, newEvent.endDate),
         importance: newEvent.importance,
         memo: newEvent.memo.trim(),
         participantProfiles,
       };
-      const { error } = await client.from('calendar_events').upsert(toCalendarEventRow(nextEvent));
+      const { error } = await upsertCalendarEvent(client, nextEvent);
 
       if (error) {
         setDataError(getRemoteErrorMessage(error));
@@ -1099,6 +1295,7 @@ export default function App() {
       ...newEvent,
       id: Date.now(),
       date: formatYMD(selectedDate),
+      endDate: normalizeEventEndDate(formatYMD(selectedDate), newEvent.endDate),
       title: newEvent.title.trim(),
       memo: newEvent.memo.trim(),
       authorUsername: currentAccount?.username ?? session.username,
@@ -1106,7 +1303,7 @@ export default function App() {
       participantProfiles,
     };
 
-    const { error } = await client.from('calendar_events').insert(toCalendarEventRow(nextEvent));
+    const { error } = await insertCalendarEvent(client, nextEvent);
 
     if (error) {
       setDataError(getRemoteErrorMessage(error));
@@ -1252,6 +1449,22 @@ export default function App() {
     );
   }
 
+  async function deleteBucketItem(itemId: number) {
+    const client = getRemoteClient();
+    if (!client) {
+      return;
+    }
+
+    const { error } = await client.from('bucket_items').delete().eq('id', itemId);
+
+    if (error) {
+      setDataError(getRemoteErrorMessage(error));
+      return;
+    }
+
+    setBucketList((previousItems) => previousItems.filter((item) => item.id !== itemId));
+  }
+
   async function addBucketItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -1284,6 +1497,7 @@ export default function App() {
 
   function renderMannerProfile(profile: AccountProfile) {
     const profileMeta = PROFILE_META[profile];
+    const profileTone = CALENDAR_EVENT_TONES[profile];
     const isCurrentProfile = currentAccount?.profile === profile;
     const profileReviews = mannerReviews
       .filter((review) => review.targetProfile === profile)
@@ -1301,23 +1515,20 @@ export default function App() {
           );
     const requestedCount = profileReviews.filter((review) => review.status === 'requested').length;
     const improvedCount = profileReviews.filter((review) => review.status === 'improved').length;
-    const temperatureTone =
-      temperature >= MANNER_BASE_TEMPERATURE + 1
-        ? 'text-rose-500'
-        : temperature < MANNER_BASE_TEMPERATURE
-          ? 'text-sky-500'
-          : 'text-[#2f2417]';
+    const temperatureColor = temperature < MANNER_BASE_TEMPERATURE ? '#918679' : profileTone.bg;
+    const temperatureOpacity = temperature >= MANNER_BASE_TEMPERATURE + 1 ? 0.82 : 0.68;
 
     return (
       <section
         key={profile}
-        className={`rounded-[28px] border bg-white p-5 shadow-[0_12px_36px_rgba(66,45,18,0.06)] ${
-          isCurrentProfile ? 'border-blue-100' : 'border-[#f2e8da]'
-        }`}
+        className="rounded-[28px] bg-[#FDFBF8] p-5 shadow-[0_12px_36px_rgba(66,45,18,0.05)]"
       >
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#fff4e6] text-2xl">
+            <div
+              className="flex h-12 w-12 items-center justify-center rounded-2xl text-2xl"
+              style={{ backgroundColor: `${profileTone.bg}22` }}
+            >
               {profileMeta.emoji}
             </div>
             <div>
@@ -1328,8 +1539,8 @@ export default function App() {
                 <span
                   className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                     isCurrentProfile
-                      ? 'bg-blue-50 text-blue-500'
-                      : 'bg-[#fff4e6] text-[#8b6a44]'
+                      ? 'bg-[#F0EDFF] text-[#7D6DE0]'
+                      : 'bg-[#F8F5EF] text-[#918679]'
                   }`}
                 >
                   {isCurrentProfile ? '내 프로필' : '상대 프로필'}
@@ -1342,7 +1553,14 @@ export default function App() {
           </div>
 
           <div className="text-right">
-            <div className={`flex items-center justify-end gap-1 text-2xl font-black ${temperatureTone}`}>
+            <div
+              className="flex items-center justify-end gap-1 rounded-2xl px-3 py-2 text-2xl font-black"
+              style={{
+                backgroundColor: `${profileTone.bg}14`,
+                color: temperatureColor,
+                opacity: temperatureOpacity,
+              }}
+            >
               <Thermometer size={20} />
               {temperature.toFixed(1)}°C
             </div>
@@ -1353,8 +1571,8 @@ export default function App() {
         </div>
 
         <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-2xl bg-[#fff8ef] px-2 py-3">
-            <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-amber-500">
+          <div className="rounded-2xl bg-[#F8F5EF] px-2 py-3">
+            <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#A594F9]">
               <Star size={14} fill="currentColor" />
             </div>
             <p className="text-[10px] font-bold text-[#9d7b52]">평균 별점</p>
@@ -1362,8 +1580,8 @@ export default function App() {
               {averageRating == null ? '-' : `${averageRating}점`}
             </p>
           </div>
-          <div className="rounded-2xl bg-[#fff8ef] px-2 py-3">
-            <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-blue-500">
+          <div className="rounded-2xl bg-[#EEF4FB] px-2 py-3">
+            <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#7DA8D8]">
               <MessageCircle size={14} />
             </div>
             <p className="text-[10px] font-bold text-[#9d7b52]">기록</p>
@@ -1371,8 +1589,8 @@ export default function App() {
               {profileReviews.length}개
             </p>
           </div>
-          <div className="rounded-2xl bg-[#fff8ef] px-2 py-3">
-            <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-emerald-500">
+          <div className="rounded-2xl bg-[#FBEFEF] px-2 py-3">
+            <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#E89B9B]">
               <TrendingUp size={14} />
             </div>
             <p className="text-[10px] font-bold text-[#9d7b52]">개선 완료</p>
@@ -1386,13 +1604,13 @@ export default function App() {
           <button
             type="button"
             onClick={openMannerReviewModal}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#2f2417] px-4 py-3 text-sm font-bold text-white"
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#A594F9] px-4 py-3 text-sm font-bold text-white"
           >
             <Star size={15} fill="currentColor" />
             {profileMeta.displayName} 매너온도 남기기
           </button>
         ) : requestedCount > 0 ? (
-          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-700">
+          <div className="mt-5 rounded-2xl bg-[#F0EDFF] px-4 py-3 text-xs font-semibold text-[#7D6DE0]">
             상대방 확인을 기다리는 개선 요청이 {requestedCount}개 있습니다.
           </div>
         ) : null}
@@ -1438,11 +1656,11 @@ export default function App() {
                       </div>
                       <div className="text-right">
                         <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
-                            reviewDelta >= 0
-                              ? 'bg-rose-50 text-rose-500'
-                              : 'bg-sky-50 text-sky-500'
-                          }`}
+                          className="rounded-full px-2 py-0.5 text-[10px] font-black"
+                          style={{
+                            backgroundColor: reviewDelta >= 0 ? '#FBEFEF' : '#EEF4FB',
+                            color: reviewDelta >= 0 ? '#D48787' : '#6F99C7',
+                          }}
                         >
                           {formatSignedTemperatureDelta(reviewDelta)}
                         </span>
@@ -1454,17 +1672,17 @@ export default function App() {
 
                     <div className="mt-3 space-y-2 text-sm leading-6">
                       <p className="text-[#6f5b43]">
-                        <span className="mr-2 font-bold text-emerald-600">장점</span>
+                        <span className="mr-2 font-bold text-[#6F99C7]">장점</span>
                         {review.strengths}
                       </p>
                       <p className="text-[#6f5b43]">
-                        <span className="mr-2 font-bold text-orange-500">개선점</span>
+                        <span className="mr-2 font-bold text-[#D48787]">개선점</span>
                         {review.improvements}
                       </p>
                     </div>
 
                     {review.status === 'improved' ? (
-                      <div className="mt-3 flex items-center gap-1.5 text-xs font-bold text-emerald-600">
+                      <div className="mt-3 flex items-center gap-1.5 text-xs font-bold text-[#6F99C7]">
                         <BadgeCheck size={14} />
                         개선 확인 완료 · {MANNER_IMPROVEMENT_BONUS.toFixed(1)}°C 반영
                       </div>
@@ -1474,7 +1692,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => requestMannerImprovement(review.id)}
-                        className="mt-3 rounded-full border border-[#eadcc9] px-3 py-1.5 text-xs font-bold text-[#7b6142]"
+                        className="mt-3 rounded-full bg-[#F8F5EF] px-3 py-1.5 text-xs font-bold text-[#8D7558]"
                       >
                         개선 완료 요청
                       </button>
@@ -1484,7 +1702,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => confirmMannerImprovement(review.id)}
-                        className="mt-3 rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white"
+                        className="mt-3 rounded-full bg-[#A594F9] px-3 py-1.5 text-xs font-bold text-white"
                       >
                         개선 확인하고 온도 올리기
                       </button>
@@ -1505,11 +1723,17 @@ export default function App() {
 
   function renderScheduleColumn(profile: AccountProfile, profileEvents: CalendarEvent[]) {
     const profileMeta = PROFILE_META[profile];
+    const profileTone = CALENDAR_EVENT_TONES[profile];
 
     return (
       <div className="flex h-full min-h-0 flex-col">
         <div className="flex shrink-0 items-center gap-2 pb-3">
-          <span className="text-lg">{profileMeta.emoji}</span>
+          <span
+            className="flex h-7 w-7 items-center justify-center rounded-xl text-sm"
+            style={{ backgroundColor: `${profileTone.bg}24` }}
+          >
+            {profileMeta.emoji}
+          </span>
           <h4 className="text-base font-bold text-[#2f2417]">{profileMeta.displayName}</h4>
         </div>
 
@@ -1525,11 +1749,14 @@ export default function App() {
               return (
                 <div
                   key={`${profile}-${event.id}`}
-                  className="rounded-[22px] border border-[#f2e8da] bg-white p-4 shadow-[0_10px_30px_rgba(66,45,18,0.05)]"
+                  className="rounded-[22px] p-4 shadow-[0_10px_30px_rgba(66,45,18,0.04)]"
+                  style={{ backgroundColor: `${profileTone.bg}12` }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-[11px] font-bold text-blue-500">{event.time}</p>
+                      <p className="text-[11px] font-bold" style={{ color: profileTone.bg }}>
+                        {event.time}
+                      </p>
                       <h5 className="mt-1 font-bold text-[#2f2417]">{event.title}</h5>
                     </div>
                     <div className="flex items-center gap-1">
@@ -1544,7 +1771,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => deleteEvent(event.id)}
-                        className="text-gray-300 transition hover:text-red-400"
+                        className="text-gray-300 transition hover:text-[#8D7558]"
                         aria-label="일정 삭제"
                       >
                         <Trash2 size={16} />
@@ -1554,7 +1781,13 @@ export default function App() {
 
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     {authorMeta && event.authorUsername ? (
-                      <span className="rounded-full bg-[#fff4e6] px-2 py-0.5 text-[10px] font-bold text-[#7c6142]">
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                        style={{
+                          backgroundColor: `${profileTone.bg}24`,
+                          color: profileTone.bg,
+                        }}
+                      >
                         {authorMeta.emoji} {authorMeta.displayName}
                       </span>
                     ) : null}
@@ -1562,7 +1795,11 @@ export default function App() {
                     {taggedProfiles.map((taggedProfile) => (
                       <span
                         key={`${event.id}-${taggedProfile}`}
-                        className="rounded-full bg-[#eef6ff] px-2 py-0.5 text-[10px] font-bold text-[#3467a8]"
+                        className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                        style={{
+                          backgroundColor: `${CALENDAR_EVENT_TONES[taggedProfile].bg}22`,
+                          color: CALENDAR_EVENT_TONES[taggedProfile].bg,
+                        }}
                       >
                         {PROFILE_META[taggedProfile].emoji}{' '}
                         {PROFILE_META[taggedProfile].displayName} 태그
@@ -1603,6 +1840,37 @@ export default function App() {
     const selectedDateKey = formatYMD(selectedDate);
     const todayKey = formatYMD(new Date());
     const visibleCellCount = Math.max(35, Math.ceil((startDay + currentMonthDays) / 7) * 7);
+    const visibleDates = Array.from({ length: visibleCellCount }, (_, index) =>
+      formatYMD(new Date(year, month, 1 - startDay + index)),
+    );
+    const visibleStart = visibleDates[0];
+    const visibleEnd = visibleDates[visibleDates.length - 1];
+    const eventLanes = new Map<number, number>();
+    const laneEnds: string[] = [];
+
+    events
+      .filter((event) => doesEventIntersectDateRange(event, visibleStart, visibleEnd))
+      .sort((left, right) => {
+        const leftEndDate = normalizeEventEndDate(left.date, left.endDate);
+        const rightEndDate = normalizeEventEndDate(right.date, right.endDate);
+        const leftIsMultiDay = leftEndDate > left.date;
+        const rightIsMultiDay = rightEndDate > right.date;
+
+        return (
+          left.date.localeCompare(right.date) ||
+          Number(!leftIsMultiDay) - Number(!rightIsMultiDay) ||
+          rightEndDate.localeCompare(leftEndDate) ||
+          left.time.localeCompare(right.time)
+        );
+      })
+      .forEach((event) => {
+        const endDate = normalizeEventEndDate(event.date, event.endDate);
+        const laneIndex = laneEnds.findIndex((laneEnd) => laneEnd < event.date);
+        const nextLaneIndex = laneIndex >= 0 ? laneIndex : laneEnds.length;
+
+        eventLanes.set(event.id, nextLaneIndex);
+        laneEnds[nextLaneIndex] = endDate;
+      });
 
     for (let index = 0; index < visibleCellCount; index += 1) {
       const dateObject = new Date(year, month, 1 - startDay + index);
@@ -1612,16 +1880,21 @@ export default function App() {
       const isSelected = dateKey === selectedDateKey;
       const isToday = dateKey === todayKey;
       const dateEvents = events
-        .filter((event) => event.date === dateKey)
-        .sort((left, right) => left.time.localeCompare(right.time));
+        .filter((event) => isDateInEventRange(event, dateKey))
+        .sort(
+          (left, right) =>
+            Math.min(eventLanes.get(left.id) ?? 99, 3) -
+              Math.min(eventLanes.get(right.id) ?? 99, 3) ||
+            left.time.localeCompare(right.time),
+        );
 
       days.push(
         <button
           key={dateKey}
           onClick={() => setSelectedDate(dateObject)}
-          className={`min-h-[104px] px-1.5 py-2 text-left transition ${
+          className={`min-h-[124px] px-1.5 py-2 text-left transition ${
             isSelected
-              ? 'bg-blue-50 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.2)]'
+              ? 'bg-[#F4F2FF] shadow-[inset_0_0_0_1px_rgba(165,148,249,0.2)]'
               : 'hover:bg-[#fffaf4]'
           } ${index >= 7 ? 'border-t border-[#f3eadf]' : ''} ${
             index % 7 === 0 ? '' : 'border-l border-[#f7efe5]'
@@ -1631,7 +1904,7 @@ export default function App() {
             <span
               className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-black ${
                 isSelected
-                  ? 'bg-blue-500 text-white'
+                  ? 'bg-[#A594F9] text-white'
                   : isToday
                     ? 'bg-[#2f2417] text-white'
                     : isCurrentMonth
@@ -1643,31 +1916,67 @@ export default function App() {
             </span>
           </div>
 
-          <div className="mt-2 space-y-1">
-            {dateEvents.slice(0, 3).map((event) => {
+          <div className="mt-2 grid grid-rows-[repeat(4,28px)] gap-1">
+            {Array.from({ length: 4 }, (_, lane) => {
+              const event = dateEvents.find(
+                (item) => Math.min(eventLanes.get(item.id) ?? 0, 3) === lane,
+              );
+
+              if (!event) {
+                return <span key={`empty-lane-${dateKey}-${lane}`} className="block h-[28px]" />;
+              }
+
               const tone = getCalendarEventTone(event);
+              const shouldKeepSingleLine = event.title.trim().length <= 6;
+              const title = shouldKeepSingleLine ? event.title.trim() : truncateMiddle(event.title);
+              const segment = getCalendarRangeSegment(event, dateKey);
+              const segmentClass =
+                segment === 'single'
+                  ? '-mx-1.5 rounded-[4px]'
+                  : segment === 'start'
+                    ? '-ml-1.5 -mr-1.5 rounded-l-[4px] rounded-r-none pr-2'
+                    : segment === 'end'
+                      ? '-ml-1.5 -mr-1.5 rounded-l-none rounded-r-[4px] pl-2'
+                      : '-mx-1.5 rounded-none';
 
               return (
                 <span
                   key={event.id}
-                  className="block w-full truncate rounded-md border px-1.5 py-1 text-[9px] font-black leading-none shadow-sm"
+                  className={`relative z-10 flex h-[28px] items-center justify-center overflow-hidden px-0.5 py-1 text-center text-[9.5px] font-black leading-[1.05] shadow-sm ${segmentClass}`}
                   style={{
                     backgroundColor: tone.bg,
-                    borderColor: tone.border,
                     color: tone.text,
                   }}
-                  title={`${event.time} ${event.title}`}
+                  title={event.title}
                 >
-                  {event.time} {event.title}
+                  <span
+                    className={`w-full overflow-hidden ${
+                      shouldKeepSingleLine ? 'px-0 text-[8px]' : 'px-1.5'
+                    }`}
+                    style={
+                      shouldKeepSingleLine
+                        ? {
+                            textOverflow: 'clip',
+                            whiteSpace: 'nowrap',
+                          }
+                        : {
+                            display: '-webkit-box',
+                            WebkitBoxOrient: 'vertical',
+                            WebkitLineClamp: 2,
+                          }
+                    }
+                  >
+                    {title}
+                  </span>
                 </span>
               );
             })}
-            {dateEvents.length > 3 ? (
-              <span className="block truncate rounded-md bg-[#f7f1e8] px-1.5 py-1 text-[9px] font-black leading-none text-[#9d7b52]">
-                +{dateEvents.length - 3}개
+          </div>
+            {dateEvents.length > 4 ? (
+              <span className="mt-1 block truncate rounded-md bg-[#f7f1e8] px-1.5 py-1 text-[9px] font-black leading-none text-[#9d7b52]">
+                +{dateEvents.length - 4}개
               </span>
             ) : null}
-          </div>
         </button>,
       );
     }
@@ -1785,27 +2094,27 @@ export default function App() {
   return (
     <main className="min-h-screen bg-[#f5efe6] px-4 py-6 text-gray-900">
       <div className="mx-auto flex min-h-[820px] max-w-md flex-col overflow-hidden rounded-[32px] bg-white shadow-[0_24px_80px_rgba(44,32,20,0.14)]">
-        <div className="flex items-center justify-between border-b border-[#f1e6d8] px-6 py-5">
-          <div>
+        <div className="flex items-center justify-between gap-3 border-b border-[#f1e6d8] px-4 py-5">
+          <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-[#9d7b52]">
               Dear Days
             </p>
-            <h1 className="mt-1 text-xl font-semibold tracking-tight text-[#2f2417]">
+            <h1 className="mt-1 truncate text-lg font-semibold tracking-tight text-[#2f2417]">
               우리 데이트 캘린더
             </h1>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full bg-[#fff5e8] px-3 py-2 text-xs font-semibold text-[#7b6142]">
+          <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#fff5e8] px-2.5 py-2 text-xs font-semibold text-[#7b6142]">
               <UserRound size={14} />
-              <span>
+              <span className="whitespace-nowrap">
                 {currentAccount
                   ? PROFILE_META[currentAccount.profile].displayName
                   : session.username}
               </span>
               {currentMannerTemperature != null ? (
-                <span className="flex items-center gap-0.5 rounded-full bg-white px-2 py-0.5 text-[11px] font-black text-blue-500 shadow-sm">
+                <span className="flex shrink-0 items-center gap-0.5 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-black text-[#7D6DE0] shadow-sm">
                   <Thermometer size={12} />
-                  {currentMannerTemperature.toFixed(1)}°C
+                  {currentMannerTemperature.toFixed(1)}°
                 </span>
               ) : null}
             </div>
@@ -1851,6 +2160,73 @@ export default function App() {
                   onOpen={() => setIsWeatherPopupOpen(true)}
                   onRefreshLocation={refreshCurrentLocation}
                 />
+
+                <section className="border-b border-[#f1e6d8] bg-white px-4 py-4">
+                  <div className="mb-3 flex items-center justify-between px-1">
+                    <div>
+                      <h2 className="text-base font-black text-[#2f2417]">다가오는 일정</h2>
+                      <p className="mt-0.5 text-xs font-medium text-[#8d7558]">
+                        {currentAccount
+                          ? `${PROFILE_META[currentAccount.profile].displayName} 기준 가까운 일정`
+                          : '오늘 기준 가까운 일정'}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-[#F8F5EF] px-2.5 py-1 text-[10px] font-black text-[#918679]">
+                      {upcomingEvents.length}개
+                    </span>
+                  </div>
+
+                  {upcomingEvents.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {upcomingEvents.slice(0, 4).map((event) => {
+                        const tone = getCalendarEventTone(event);
+                        const participants = getEventParticipantProfiles(event);
+                        const isShared =
+                          participants.includes('boyfriend') && participants.includes('girlfriend');
+                        const endDate = normalizeEventEndDate(event.date, event.endDate);
+                        const dateText =
+                          event.date === endDate
+                            ? formatCalendarDateLabel(event.date)
+                            : `${formatCalendarDateLabel(event.date)}-${formatCalendarDateLabel(
+                                endDate,
+                              )}`;
+                        const ownerText = isShared
+                          ? '공통'
+                          : participants[0]
+                            ? PROFILE_META[participants[0]].displayName
+                            : '일정';
+
+                        return (
+                          <button
+                            key={`upcoming-${event.id}`}
+                            type="button"
+                            onClick={() => setSelectedDate(new Date(event.date))}
+                            className="min-w-0 rounded-[18px] bg-[#FDFBF8] px-3 py-3 text-left shadow-[0_8px_22px_rgba(66,45,18,0.04)]"
+                          >
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <span className="truncate text-[10px] font-black text-[#8d7558]">
+                                {dateText}
+                              </span>
+                              <span
+                                className="shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black text-white"
+                                style={{ backgroundColor: tone.bg }}
+                              >
+                                {ownerText}
+                              </span>
+                            </div>
+                            <p className="truncate text-sm font-black text-[#2f2417]">
+                              {event.title}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-[18px] bg-[#F8F5EF] px-4 py-4 text-center text-xs font-bold text-[#918679]">
+                      예정된 일정이 없습니다.
+                    </div>
+                  )}
+                </section>
 
                 <div className="px-4 pb-10 pt-4">
                   <div className="mb-6 flex items-end justify-between px-2">
@@ -1910,10 +2286,9 @@ export default function App() {
                       return (
                         <span
                           key={toneKey}
-                          className="rounded-full border px-2 py-1 text-[10px] font-black"
+                          className="rounded-full px-2.5 py-1 text-[10px] font-black"
                           style={{
                             backgroundColor: tone.bg,
-                            borderColor: tone.border,
                             color: tone.text,
                           }}
                         >
@@ -1938,7 +2313,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={openAddModal}
-                        className="flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-500"
+                        className="flex items-center gap-1 rounded-full bg-[#F0EDFF] px-3 py-1.5 text-xs font-bold text-[#7D6DE0]"
                       >
                         <Plus size={14} />
                         추가
@@ -1971,7 +2346,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={openMannerReviewModal}
-                    className="flex shrink-0 items-center gap-1 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-500"
+                    className="flex shrink-0 items-center gap-1 rounded-full bg-[#F0EDFF] px-3 py-1.5 text-xs font-bold text-[#7D6DE0]"
                   >
                     <Star size={14} fill="currentColor" />
                     평가
@@ -1979,7 +2354,7 @@ export default function App() {
                 </div>
 
                 {currentAccount && currentPartnerProfile ? (
-                  <div className="mb-5 rounded-[24px] border border-[#f2e8da] bg-[#fffaf4] px-4 py-3">
+                  <div className="mb-5 rounded-[24px] bg-[#F8F5EF] px-4 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-bold text-[#9d7b52]">현재 로그인</p>
@@ -2013,7 +2388,7 @@ export default function App() {
                     <p className="mt-2 text-sm text-[#8d7558]">함께하고 싶은 모든 것</p>
                   </div>
                   <div className="text-right">
-                    <span className="text-2xl font-black text-blue-500">{bucketStats.percentage}%</span>
+                    <span className="text-2xl font-black text-[#A594F9]">{bucketStats.percentage}%</span>
                     <p className="text-[10px] font-bold text-gray-400">
                       ({bucketStats.completed}/{bucketStats.total}) 완료됨
                     </p>
@@ -2022,7 +2397,7 @@ export default function App() {
 
                 <div className="mb-5 h-3 w-full overflow-hidden rounded-full bg-gray-100">
                   <div
-                    className="h-full rounded-full bg-blue-500 transition-[width]"
+                    className="h-full rounded-full bg-[#A594F9] transition-[width]"
                     style={{ width: `${bucketStats.percentage}%` }}
                   />
                 </div>
@@ -2035,8 +2410,8 @@ export default function App() {
                       onClick={() => setBucketFilter(filter)}
                       className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
                         bucketFilter === filter
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-[#fff5e8] text-[#7b6142]'
+                          ? 'bg-[#F0EDFF] text-[#7D6DE0]'
+                          : 'bg-[#F8F5EF] text-[#9A8F82]'
                       }`}
                     >
                       {BUCKET_FILTER_LABELS[filter]}
@@ -2049,22 +2424,22 @@ export default function App() {
                     filteredBucketList.map((item) => (
                       <div
                         key={item.id}
-                        className={`flex items-center justify-between rounded-[24px] border p-4 transition ${
+                        className={`flex items-center justify-between gap-3 rounded-[24px] p-4 transition ${
                           item.status === 'completed'
-                            ? 'border-transparent bg-gray-50'
-                            : 'border-gray-100 bg-white shadow-sm'
+                            ? 'bg-[#FBF7F7]'
+                            : 'bg-[#FDFBF8] shadow-sm'
                         }`}
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
                           <button
                             type="button"
                             onClick={() => toggleBucketStatus(item.id)}
-                            className={`flex h-6 w-6 items-center justify-center rounded-full transition-colors ${
+                            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors ${
                               item.status === 'completed'
-                                ? 'bg-blue-500 text-white'
+                                ? 'bg-[#FBEFEF] text-[#D48787]'
                                 : item.status === 'ready'
-                                  ? 'bg-orange-100 text-orange-500'
-                                  : 'border-2 border-gray-200'
+                                  ? 'bg-[#EEF4FB] text-[#6F99C7]'
+                                  : 'bg-[#F4F1EC] text-[#918679]'
                             }`}
                           >
                             {item.status === 'completed' ? <Check size={14} strokeWidth={3} /> : null}
@@ -2075,26 +2450,30 @@ export default function App() {
                               item.status === 'completed'
                                 ? 'text-gray-400 line-through'
                                 : 'text-gray-700'
-                            }`}
+                            } truncate`}
                           >
                             {item.text}
                           </span>
                         </div>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                            item.status === 'completed'
-                              ? 'bg-green-100 text-green-600'
-                              : item.status === 'ready'
-                                ? 'bg-orange-100 text-orange-600'
-                                : 'bg-gray-100 text-gray-500'
-                          }`}
-                        >
-                          {item.status === 'completed'
-                            ? '완료'
-                            : item.status === 'ready'
-                              ? '준비중'
-                              : '미완료'}
-                        </span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span
+                            className="rounded-full px-2.5 py-1 text-[10px] font-bold"
+                            style={{
+                              backgroundColor: BUCKET_STATUS_TONES[item.status].bg,
+                              color: BUCKET_STATUS_TONES[item.status].text,
+                            }}
+                          >
+                            {BUCKET_STATUS_TONES[item.status].label}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => deleteBucketItem(item.id)}
+                            className="p-1 text-[#B8AEA5] transition hover:text-[#7F766E]"
+                            aria-label="버킷리스트 삭제"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
                     ))
                   ) : (
@@ -2111,7 +2490,7 @@ export default function App() {
             <button
               type="button"
               onClick={activeTab === 'calendar' ? openAddModal : openBucketModal}
-              className="absolute bottom-[5.75rem] left-1/2 z-20 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-2xl bg-blue-500 text-white shadow-[0_16px_32px_rgba(59,130,246,0.32)]"
+              className="absolute bottom-[5.75rem] left-1/2 z-20 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-2xl bg-[#A594F9] text-white shadow-[0_16px_32px_rgba(165,148,249,0.3)]"
               aria-label={activeTab === 'calendar' ? '일정 추가' : '버킷리스트 추가'}
             >
               <Plus size={26} />
@@ -2123,7 +2502,7 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab('calendar')}
               className={`flex flex-col items-center gap-1 ${
-                activeTab === 'calendar' ? 'text-blue-500' : 'text-gray-300'
+                activeTab === 'calendar' ? 'text-[#A594F9]' : 'text-gray-300'
               }`}
             >
               <CalendarIcon size={24} />
@@ -2133,7 +2512,7 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab('manner')}
               className={`flex flex-col items-center gap-1 ${
-                activeTab === 'manner' ? 'text-blue-500' : 'text-gray-300'
+                activeTab === 'manner' ? 'text-[#A594F9]' : 'text-gray-300'
               }`}
             >
               <Thermometer size={24} />
@@ -2143,7 +2522,7 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab('bucket')}
               className={`flex flex-col items-center gap-1 ${
-                activeTab === 'bucket' ? 'text-blue-500' : 'text-gray-300'
+                activeTab === 'bucket' ? 'text-[#A594F9]' : 'text-gray-300'
               }`}
             >
               <CheckCircle2 size={24} />
@@ -2201,18 +2580,40 @@ export default function App() {
                     className="w-full rounded-2xl bg-gray-50 px-4 py-4 outline-none"
                   />
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <input
-                      type="time"
-                      value={newEvent.time}
-                      onChange={(event) =>
-                        setNewEvent((previousEvent) => ({
-                          ...previousEvent,
-                          time: event.target.value,
-                        }))
-                      }
-                      className="rounded-2xl bg-gray-50 px-4 py-4 outline-none"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
+                        시간
+                      </span>
+                      <input
+                        type="time"
+                        value={newEvent.time}
+                        onChange={(event) =>
+                          setNewEvent((previousEvent) => ({
+                            ...previousEvent,
+                            time: event.target.value,
+                          }))
+                        }
+                        className="w-full rounded-2xl bg-gray-50 px-4 py-4 outline-none"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
+                        종료일
+                      </span>
+                      <input
+                        type="date"
+                        min={eventModalStartDate}
+                        value={newEvent.endDate || eventModalStartDate}
+                        onChange={(event) =>
+                          setNewEvent((previousEvent) => ({
+                            ...previousEvent,
+                            endDate: event.target.value,
+                          }))
+                        }
+                        className="w-full rounded-2xl bg-gray-50 px-3 py-4 text-sm outline-none"
+                      />
+                    </label>
                     <select
                       value={newEvent.importance}
                       onChange={(event) =>
@@ -2221,7 +2622,7 @@ export default function App() {
                           importance: Number(event.target.value) as CalendarEvent['importance'],
                         }))
                       }
-                      className="rounded-2xl bg-gray-50 px-4 py-4 outline-none"
+                      className="col-span-2 rounded-2xl bg-gray-50 px-4 py-4 outline-none"
                     >
                       <option value={1}>매우 중요</option>
                       <option value={2}>중요</option>
@@ -2244,7 +2645,7 @@ export default function App() {
                             onClick={() => toggleEventParticipant(profile)}
                             className={`rounded-full px-3 py-2 text-xs font-bold transition ${
                               isSelected
-                                ? 'bg-blue-500 text-white'
+                                ? 'bg-[#A594F9] text-white'
                                 : 'bg-[#fff5e8] text-[#7b6142]'
                             }`}
                           >
@@ -2273,7 +2674,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={addEvent}
-                    className="w-full rounded-2xl bg-blue-500 py-4 font-bold text-white"
+                    className="w-full rounded-2xl bg-[#A594F9] py-4 font-bold text-white"
                   >
                     {editingEventId != null ? '수정 완료' : '완료'}
                   </button>
@@ -2328,8 +2729,8 @@ export default function App() {
                         }
                         className={`rounded-2xl px-3 py-3 text-xs font-black transition ${
                           bucketDraft.status === status
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-[#fff5e8] text-[#7b6142]'
+                            ? 'bg-[#F0EDFF] text-[#7D6DE0]'
+                            : 'bg-[#F8F5EF] text-[#9A8F82]'
                         }`}
                       >
                         {status === 'completed'
@@ -2343,7 +2744,7 @@ export default function App() {
 
                   <button
                     type="submit"
-                    className="w-full rounded-2xl bg-blue-500 py-4 font-bold text-white"
+                    className="w-full rounded-2xl bg-[#A594F9] py-4 font-bold text-white"
                   >
                     추가 완료
                   </button>
@@ -2396,8 +2797,8 @@ export default function App() {
                             }
                             className={`flex h-12 flex-col items-center justify-center rounded-2xl text-xs font-black transition ${
                               isSelected
-                                ? 'bg-blue-500 text-white'
-                                : 'bg-gray-50 text-gray-400'
+                                ? 'bg-[#A594F9] text-white'
+                                : 'bg-[#F8F5EF] text-[#918679]'
                             }`}
                             aria-label={`${rating}점`}
                           >
@@ -2457,7 +2858,7 @@ export default function App() {
 
                   <button
                     type="submit"
-                    className="w-full rounded-2xl bg-blue-500 py-4 font-bold text-white"
+                    className="w-full rounded-2xl bg-[#A594F9] py-4 font-bold text-white"
                   >
                     프로필에 남기기
                   </button>

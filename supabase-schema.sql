@@ -1,6 +1,7 @@
 create table if not exists public.calendar_events (
   id bigint primary key,
   date text not null,
+  end_date text not null,
   time text not null,
   title text not null,
   importance smallint not null check (importance in (1, 2, 3)),
@@ -11,6 +12,16 @@ create table if not exists public.calendar_events (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.calendar_events
+add column if not exists end_date text;
+
+update public.calendar_events
+set end_date = date
+where end_date is null;
+
+alter table public.calendar_events
+alter column end_date set not null;
 
 create table if not exists public.bucket_items (
   id bigint primary key,
