@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import {
+  Bell,
   Calendar as CalendarIcon,
   Check,
   CheckCircle2,
@@ -22,6 +23,13 @@ import {
 
 import { GoogleWeatherPopup } from './components/GoogleWeatherPopup';
 import { WeatherWidget } from './components/WeatherWidget';
+import {
+  getInitialPushNotificationStatus,
+  getPushNotificationStatusText,
+  notifyPushUpdate,
+  registerPushSubscription,
+  type PushNotificationStatus,
+} from './lib/pushNotifications';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import {
   DEFAULT_LOCATION,
@@ -698,6 +706,8 @@ export default function App() {
   const [weatherData, setWeatherData] = useState<WeatherSnapshot | null>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
+  const [pushNotificationStatus, setPushNotificationStatus] =
+    useState<PushNotificationStatus>(() => getInitialPushNotificationStatus());
 
   useEffect(() => {
     writeStorage(LOCATION_STORAGE_KEY, location);
@@ -907,6 +917,21 @@ export default function App() {
     void loadRemoteData();
   }, [currentAccount, session]);
 
+  useEffect(() => {
+    if (
+      !session ||
+      !currentAccount ||
+      pushNotificationStatus === 'loading' ||
+      pushNotificationStatus === 'subscribed' ||
+      typeof Notification === 'undefined' ||
+      Notification.permission !== 'granted'
+    ) {
+      return;
+    }
+
+    void enablePushNotifications(true);
+  }, [currentAccount, pushNotificationStatus, session]);
+
   const boyfriendEvents = useMemo(
     () =>
       selectedDateEvents.filter((event) =>
@@ -963,6 +988,97 @@ export default function App() {
     return message.includes('relation')
       ? 'Supabase 테이블을 찾을 수 없습니다. supabase-schema.sql을 SQL Editor에서 먼저 실행해 주세요.'
       : message || 'Supabase 요청에 실패했습니다.';
+  }
+
+  async function getCurrentAccessToken() {
+    if (!supabase) {
+      return null;
+    }
+
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token ?? null;
+  }
+
+  async function enablePushNotifications(isSilent = false) {
+    if (!currentAccount) {
+      return;
+    }
+
+    setPushNotificationStatus('loading');
+
+    try {
+      const token = await getCurrentAccessToken();
+
+      if (!token) {
+        throw new Error('Missing auth token.');
+      }
+
+      await registerPushSubscription({
+        profile: currentAccount.profile,
+        token,
+        username: currentAccount.username,
+      });
+      setPushNotificationStatus('subscribed');
+    } catch (error) {
+      if (!isSilent) {
+        console.warn('Push notification setup failed', error);
+      }
+
+      setPushNotificationStatus(
+        typeof Notification !== 'undefined' && Notification.permission === 'denied'
+          ? 'denied'
+          : 'error',
+      );
+    }
+  }
+
+  async function publishPushNotification({
+    body,
+    tag,
+    targetProfiles,
+    title,
+    type,
+    url = '/',
+  }: {
+    body: string;
+    tag?: string;
+    targetProfiles?: AccountProfile[];
+    title: string;
+    type: string;
+    url?: string;
+  }) {
+    if (!currentAccount) {
+      return;
+    }
+
+    const token = await getCurrentAccessToken();
+    await notifyPushUpdate(
+      {
+        actorProfile: currentAccount.profile,
+        actorUsername: currentAccount.username,
+        body,
+        tag,
+        targetProfiles,
+        title,
+        type,
+        url,
+      },
+      token,
+    );
+  }
+
+  function getNotificationTargetProfiles(profiles?: AccountProfile[]) {
+    if (!currentAccount) {
+      return undefined;
+    }
+
+    const baseProfiles: AccountProfile[] =
+      profiles && profiles.length > 0 ? profiles : ['boyfriend', 'girlfriend'];
+    const targetProfiles = Array.from(new Set<AccountProfile>(baseProfiles)).filter(
+      (profile) => profile !== currentAccount.profile,
+    );
+
+    return targetProfiles.length > 0 ? targetProfiles : [getPartnerProfile(currentAccount.profile)];
   }
 
   async function insertCalendarEvent(client: NonNullable<typeof supabase>, event: CalendarEvent) {
@@ -1162,6 +1278,13 @@ export default function App() {
     }
 
     setMannerReviews((previousReviews) => [nextReview, ...previousReviews]);
+    void publishPushNotification({
+      body: `${PROFILE_META[currentAccount.profile].displayName}님이 러브온도 기록을 남겼어요.`,
+      tag: `manner-${nextReview.id}`,
+      targetProfiles: [targetProfile],
+      title: '새 러브온도 기록',
+      type: 'manner-review',
+    });
     closeMannerReviewModal();
     setActiveTab('manner');
   }
@@ -1276,6 +1399,13 @@ export default function App() {
       setEvents((previousEvents) =>
         previousEvents.map((event) => (event.id === editingEventId ? nextEvent : event)),
       );
+      void publishPushNotification({
+        body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 "${nextEvent.title}" 일정을 수정했어요.`,
+        tag: `calendar-${nextEvent.id}`,
+        targetProfiles: getNotificationTargetProfiles(getEventParticipantProfiles(nextEvent)),
+        title: '일정 수정',
+        type: 'calendar-event',
+      });
       closeEventModal();
       return;
     }
@@ -1307,6 +1437,13 @@ export default function App() {
     }
 
     setEvents((previousEvents) => [...previousEvents, nextEvent]);
+    void publishPushNotification({
+      body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 "${nextEvent.title}" 일정을 추가했어요.`,
+      tag: `calendar-${nextEvent.id}`,
+      targetProfiles: getNotificationTargetProfiles(getEventParticipantProfiles(nextEvent)),
+      title: '새 일정',
+      type: 'calendar-event',
+    });
     closeEventModal();
   }
 
@@ -1316,6 +1453,7 @@ export default function App() {
       return;
     }
 
+    const targetEvent = events.find((event) => event.id === eventId);
     const { error } = await client.from('calendar_events').delete().eq('id', eventId);
 
     if (error) {
@@ -1324,6 +1462,15 @@ export default function App() {
     }
 
     setEvents((previousEvents) => previousEvents.filter((event) => event.id !== eventId));
+    if (targetEvent) {
+      void publishPushNotification({
+        body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 "${targetEvent.title}" 일정을 삭제했어요.`,
+        tag: `calendar-${targetEvent.id}`,
+        targetProfiles: getNotificationTargetProfiles(getEventParticipantProfiles(targetEvent)),
+        title: '일정 삭제',
+        type: 'calendar-event',
+      });
+    }
   }
 
   async function toggleBucketStatus(itemId: number) {
@@ -1353,6 +1500,13 @@ export default function App() {
     setBucketList((previousItems) =>
       previousItems.map((item) => (item.id === itemId ? nextItem : item)),
     );
+    void publishPushNotification({
+      body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 "${nextItem.text}" 상태를 바꿨어요.`,
+      tag: `bucket-${nextItem.id}`,
+      targetProfiles: getNotificationTargetProfiles(),
+      title: '버킷리스트 업데이트',
+      type: 'bucket-item',
+    });
   }
 
   async function deleteBucketItem(itemId: number) {
@@ -1361,6 +1515,7 @@ export default function App() {
       return;
     }
 
+    const targetItem = bucketList.find((item) => item.id === itemId);
     const { error } = await client.from('bucket_items').delete().eq('id', itemId);
 
     if (error) {
@@ -1369,6 +1524,15 @@ export default function App() {
     }
 
     setBucketList((previousItems) => previousItems.filter((item) => item.id !== itemId));
+    if (targetItem) {
+      void publishPushNotification({
+        body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 "${targetItem.text}" 항목을 삭제했어요.`,
+        tag: `bucket-${targetItem.id}`,
+        targetProfiles: getNotificationTargetProfiles(),
+        title: '버킷리스트 삭제',
+        type: 'bucket-item',
+      });
+    }
   }
 
   async function addBucketItem(event: FormEvent<HTMLFormElement>) {
@@ -1398,6 +1562,13 @@ export default function App() {
 
     setBucketList((previousItems) => [nextItem, ...previousItems]);
     setBucketFilter(nextItem.status);
+    void publishPushNotification({
+      body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 "${nextItem.text}" 항목을 추가했어요.`,
+      tag: `bucket-${nextItem.id}`,
+      targetProfiles: getNotificationTargetProfiles(),
+      title: '새 버킷리스트',
+      type: 'bucket-item',
+    });
     closeBucketModal();
   }
 
@@ -1480,7 +1651,6 @@ export default function App() {
             <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#A594F9]">
               <Star size={14} fill="currentColor" />
             </div>
-            <p className="text-[10px] font-bold text-[#9d7b52]">평균 별점</p>
             <p className="mt-1 text-sm font-black text-[#2f2417]">
               {averageRating == null ? '-' : `${averageRating}점`}
             </p>
@@ -1564,12 +1734,10 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="mt-3 space-y-2 text-sm leading-6">
-                      <p className="text-[#6f5b43]">
-                        <span className="mr-2 font-bold text-[#6F99C7]">장점</span>
-                        {review.strengths}
-                      </p>
-                    </div>
+                    <p className="mt-3 text-sm leading-6 text-[#6f5b43]">
+                      <span className="mr-2 font-bold text-[#6F99C7]">장점</span>
+                      {review.strengths}
+                    </p>
                   </div>
                 );
               })}
@@ -2203,7 +2371,7 @@ export default function App() {
                     </p>
                     <h2 className="mt-1 text-2xl font-bold text-[#2f2417]">러브온도</h2>
                     <p className="mt-2 text-sm leading-6 text-[#8d7558]">
-                      상대방에게만 평점과 좋은 점을 남길 수 있고, 기록이 쌓일수록 온도가 달라집니다.
+                      상대방에게만 평점과 디테일을 남길 수 있고, 개선 확인이 끝나면 온도가 올라갑니다.
                     </p>
                   </div>
                   <button
@@ -2745,6 +2913,37 @@ export default function App() {
                     <p className="mt-1 text-sm text-[#8d7558]">{currentAccount.email}</p>
                   </div>
                 ) : null}
+
+                <div className="mt-3 rounded-2xl bg-[#F8F5EF] px-4 py-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#9d7b52]">
+                        Push
+                      </p>
+                      <p className="mt-2 font-bold text-[#2f2417]">푸시 알림</p>
+                      <p className="mt-1 text-sm leading-5 text-[#8d7558]">
+                        {getPushNotificationStatusText(pushNotificationStatus)}
+                      </p>
+                    </div>
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-[#A594F9]">
+                      <Bell size={18} />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void enablePushNotifications()}
+                    disabled={
+                      pushNotificationStatus === 'loading' ||
+                      pushNotificationStatus === 'unsupported' ||
+                      pushNotificationStatus === 'missing-key' ||
+                      pushNotificationStatus === 'denied'
+                    }
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#A594F9] py-3 text-sm font-bold text-white disabled:bg-[#ded6c9] disabled:text-[#918679]"
+                  >
+                    <Bell size={15} />
+                    {pushNotificationStatus === 'subscribed' ? '알림 다시 연결' : '알림 켜기'}
+                  </button>
+                </div>
 
                 <button
                   type="button"
