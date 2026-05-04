@@ -7,15 +7,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Heart,
   LockKeyhole,
   LogOut,
-  MessageCircle,
   Pencil,
   Plus,
   Settings,
-  Star,
   Thermometer,
-  TrendingUp,
   Trash2,
   UserRound,
   X,
@@ -146,7 +144,7 @@ interface MannerReviewDraft {
 
 const LOCATION_STORAGE_KEY = 'dating:location';
 const MANNER_BASE_TEMPERATURE = 36.5;
-const MANNER_RATING_STEP = 0.35;
+const MANNER_RATING_STEP = 0.1;
 const MANNER_MIN_TEMPERATURE = 30;
 const MANNER_MAX_TEMPERATURE = 45;
 const CALENDAR_CELL_TITLE_MAX_LENGTH = 18;
@@ -198,14 +196,6 @@ const MANNER_STATUS_LABELS: Record<MannerReviewStatus, string> = {
   open: '기록 완료',
   requested: '기록 완료',
   improved: '기록 완료',
-};
-
-const MANNER_RATING_LABELS: Record<MannerRating, string> = {
-  1: '아쉬웠어요',
-  2: '조금 아쉬워요',
-  3: '괜찮아요',
-  4: '좋았어요',
-  5: '최고예요',
 };
 
 const DEFAULT_ACCOUNTS: Account[] = [
@@ -617,21 +607,6 @@ function formatReviewDate(timestamp: string) {
 function formatCalendarDateLabel(dateKey: string) {
   const [, month, day] = dateKey.split('-');
   return `${Number(month)}월 ${Number(day)}일`;
-}
-
-function renderRatingStars(rating: MannerRating, size = 13) {
-  return (
-    <span className="flex items-center gap-0.5" aria-label={`${rating}점`}>
-      {([1, 2, 3, 4, 5] as MannerRating[]).map((starRating) => (
-        <Star
-          key={starRating}
-          size={size}
-          className={starRating <= rating ? 'text-[#A594F9]' : 'text-gray-200'}
-          fill={starRating <= rating ? 'currentColor' : 'none'}
-        />
-      ))}
-    </span>
-  );
 }
 
 function loadLocation() {
@@ -1245,7 +1220,7 @@ export default function App() {
     const strengths = mannerReviewDraft.strengths.trim();
 
     if (!strengths) {
-      setMannerReviewError('장점을 입력해 주세요.');
+      setMannerReviewError('칭찬을 입력해 주세요.');
       return;
     }
 
@@ -1279,10 +1254,10 @@ export default function App() {
 
     setMannerReviews((previousReviews) => [nextReview, ...previousReviews]);
     void publishPushNotification({
-      body: `${PROFILE_META[currentAccount.profile].displayName}님이 러브온도 기록을 남겼어요.`,
+      body: `${PROFILE_META[currentAccount.profile].displayName}님이 칭찬을 남겼어요.`,
       tag: `manner-${nextReview.id}`,
       targetProfiles: [targetProfile],
-      title: '새 러브온도 기록',
+      title: '새 칭찬 기록',
       type: 'manner-review',
     });
     closeMannerReviewModal();
@@ -1581,16 +1556,6 @@ export default function App() {
       .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
     const recentReviews = profileReviews.slice(0, 3);
     const temperature = calculateMannerTemperature(profile, mannerReviews);
-    const averageRating =
-      profileReviews.length === 0
-        ? null
-        : Number(
-            (
-              profileReviews.reduce((total, review) => total + review.rating, 0) /
-              profileReviews.length
-            ).toFixed(1),
-          );
-    const highRatingCount = profileReviews.filter((review) => review.rating >= 4).length;
     const temperatureColor = temperature < MANNER_BASE_TEMPERATURE ? '#918679' : profileTone.bg;
     const temperatureOpacity = temperature >= MANNER_BASE_TEMPERATURE + 1 ? 0.82 : 0.68;
 
@@ -1622,9 +1587,7 @@ export default function App() {
                   {isCurrentProfile ? '내 프로필' : '상대 프로필'}
                 </span>
               </div>
-              <p className="mt-1 text-xs text-[#8d7558]">
-                {profileMeta.label}에게 남겨진 러브 기록
-              </p>
+              <p className="mt-1 text-xs text-[#8d7558]">{profileMeta.label}에게 남겨진 칭찬</p>
             </div>
           </div>
 
@@ -1646,49 +1609,20 @@ export default function App() {
           </div>
         </div>
 
-        <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-          <div className="rounded-2xl bg-[#F8F5EF] px-2 py-3">
-            <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#A594F9]">
-              <Star size={14} fill="currentColor" />
-            </div>
-            <p className="mt-1 text-sm font-black text-[#2f2417]">
-              {averageRating == null ? '-' : `${averageRating}점`}
-            </p>
-          </div>
-          <div className="rounded-2xl bg-[#EEF4FB] px-2 py-3">
-            <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#7DA8D8]">
-              <MessageCircle size={14} />
-            </div>
-            <p className="text-[10px] font-bold text-[#9d7b52]">기록</p>
-            <p className="mt-1 text-sm font-black text-[#2f2417]">
-              {profileReviews.length}개
-            </p>
-          </div>
-          <div className="rounded-2xl bg-[#FBEFEF] px-2 py-3">
-            <div className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-full bg-white text-[#E89B9B]">
-              <TrendingUp size={14} />
-            </div>
-            <p className="text-[10px] font-bold text-[#9d7b52]">좋은 평가</p>
-            <p className="mt-1 text-sm font-black text-[#2f2417]">
-              {highRatingCount}개
-            </p>
-          </div>
-        </div>
-
         {!isCurrentProfile ? (
           <button
             type="button"
             onClick={openMannerReviewModal}
             className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#A594F9] px-4 py-3 text-sm font-bold text-white"
           >
-            <Star size={15} fill="currentColor" />
-            {profileMeta.displayName} 러브온도 남기기
+            <Heart size={15} fill="currentColor" />
+            {profileMeta.displayName} 칭찬 남기기
           </button>
         ) : null}
 
         <div className="mt-5">
           <div className="mb-1 flex items-center justify-between">
-            <h4 className="text-sm font-bold text-[#2f2417]">프로필 디테일</h4>
+            <h4 className="text-sm font-bold text-[#2f2417]">칭찬해요</h4>
             <span className="text-[10px] font-bold text-gray-400">최근 3개</span>
           </div>
 
@@ -1705,17 +1639,11 @@ export default function App() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {renderRatingStars(review.rating)}
-                          <span className="text-xs font-bold text-[#2f2417]">
-                            {MANNER_RATING_LABELS[review.rating]}
-                          </span>
-                          <span className="text-[10px] font-bold text-gray-400">
+                        <p className="text-[11px] font-semibold text-[#8d7558]">
+                          {authorMeta.emoji} {authorMeta.displayName}가 남김
+                          <span className="ml-2 text-gray-400">
                             {formatReviewDate(review.createdAt)}
                           </span>
-                        </div>
-                        <p className="mt-1 text-[11px] font-semibold text-[#8d7558]">
-                          {authorMeta.emoji} {authorMeta.displayName}가 남김
                         </p>
                       </div>
                       <div className="text-right">
@@ -1734,17 +1662,14 @@ export default function App() {
                       </div>
                     </div>
 
-                    <p className="mt-3 text-sm leading-6 text-[#6f5b43]">
-                      <span className="mr-2 font-bold text-[#6F99C7]">장점</span>
-                      {review.strengths}
-                    </p>
+                    <p className="mt-3 text-sm leading-6 text-[#6f5b43]">{review.strengths}</p>
                   </div>
                 );
               })}
             </div>
           ) : (
             <div className="mt-3 rounded-2xl border-2 border-dashed border-[#f0e3d0] bg-[#fffaf4] py-8 text-center text-sm text-[#a0896d]">
-              아직 남겨진 러브 기록이 없습니다.
+              아직 남겨진 칭찬이 없습니다.
             </div>
           )}
         </div>
@@ -2371,7 +2296,7 @@ export default function App() {
                     </p>
                     <h2 className="mt-1 text-2xl font-bold text-[#2f2417]">러브온도</h2>
                     <p className="mt-2 text-sm leading-6 text-[#8d7558]">
-                      상대방에게만 평점과 디테일을 남길 수 있고, 개선 확인이 끝나면 온도가 올라갑니다.
+                      서로에게 남긴 따뜻한 칭찬을 모아둡니다.
                     </p>
                   </div>
                   <button
@@ -2379,8 +2304,8 @@ export default function App() {
                     onClick={openMannerReviewModal}
                     className="flex shrink-0 items-center gap-1 rounded-full bg-[#F0EDFF] px-3 py-1.5 text-xs font-bold text-[#7D6DE0]"
                   >
-                    <Star size={14} fill="currentColor" />
-                    평가
+                    <Heart size={14} fill="currentColor" />
+                    칭찬
                   </button>
                 </div>
 
@@ -2395,7 +2320,7 @@ export default function App() {
                         </p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs font-bold text-[#9d7b52]">평가 대상</p>
+                        <p className="text-xs font-bold text-[#9d7b52]">칭찬 대상</p>
                         <p className="mt-1 text-sm font-bold text-[#2f2417]">
                           {PROFILE_META[currentPartnerProfile].emoji}{' '}
                           {PROFILE_META[currentPartnerProfile].displayName}
@@ -2789,11 +2714,11 @@ export default function App() {
               <form className="w-full rounded-t-[32px] bg-white p-8" onSubmit={submitMannerReview}>
                 <div className="mb-6 flex items-center justify-between">
                   <div>
-                    <h3 className="text-xl font-bold text-[#2f2417]">러브온도 남기기</h3>
+                    <h3 className="text-xl font-bold text-[#2f2417]">칭찬 남기기</h3>
                     {currentPartnerProfile ? (
                       <p className="mt-1 text-sm text-[#8d7558]">
                         {PROFILE_META[currentPartnerProfile].emoji}{' '}
-                        {PROFILE_META[currentPartnerProfile].displayName}에게만 기록됩니다.
+                        {PROFILE_META[currentPartnerProfile].displayName}에게만 남겨집니다.
                       </p>
                     ) : null}
                   </div>
@@ -2808,51 +2733,12 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
-                  <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#9d7b52]">
-                      Rating
-                    </p>
-                    <div className="grid grid-cols-5 gap-2">
-                      {([1, 2, 3, 4, 5] as MannerRating[]).map((rating) => {
-                        const isSelected = mannerReviewDraft.rating === rating;
-
-                        return (
-                          <button
-                            key={rating}
-                            type="button"
-                            onClick={() =>
-                              setMannerReviewDraft((previousDraft) => ({
-                                ...previousDraft,
-                                rating,
-                              }))
-                            }
-                            className={`flex h-12 flex-col items-center justify-center rounded-2xl text-xs font-black transition ${
-                              isSelected
-                                ? 'bg-[#A594F9] text-white'
-                                : 'bg-[#F8F5EF] text-[#918679]'
-                            }`}
-                            aria-label={`${rating}점`}
-                          >
-                            <Star
-                              size={15}
-                              fill={isSelected ? 'currentColor' : 'none'}
-                            />
-                            {rating}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="mt-2 text-xs font-semibold text-[#8d7558]">
-                      {MANNER_RATING_LABELS[mannerReviewDraft.rating]}
-                    </p>
-                  </div>
-
                   <label className="block">
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-[#9d7b52]">
-                      장점
+                      칭찬해요
                     </span>
                     <textarea
-                      placeholder="좋았던 점을 구체적으로 적어주세요."
+                      placeholder="고마웠던 점, 예뻤던 말, 칭찬하고 싶은 순간을 적어주세요."
                       value={mannerReviewDraft.strengths}
                       onChange={(event) =>
                         setMannerReviewDraft((previousDraft) => ({
@@ -2874,7 +2760,7 @@ export default function App() {
                     type="submit"
                     className="w-full rounded-2xl bg-[#A594F9] py-4 font-bold text-white"
                   >
-                    프로필에 남기기
+                    칭찬 남기기
                   </button>
                 </div>
               </form>
