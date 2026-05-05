@@ -1337,35 +1337,6 @@ export default function App() {
     setActiveTab('manner');
   }
 
-  async function deleteMannerReview(review: MannerReview) {
-    if (currentAccount?.profile !== review.authorProfile) {
-      return;
-    }
-
-    const client = getRemoteClient();
-    if (!client) {
-      return;
-    }
-
-    const { error } = await client.from('manner_reviews').delete().eq('id', review.id);
-
-    if (error) {
-      setDataError(getRemoteErrorMessage(error));
-      return;
-    }
-
-    setMannerReviews((previousReviews) =>
-      previousReviews.filter((previousReview) => previousReview.id !== review.id),
-    );
-    void publishPushNotification({
-      body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 칭찬을 삭제했어요.`,
-      tag: `manner-${review.id}`,
-      targetProfiles: getNotificationTargetProfiles([review.authorProfile, review.targetProfile]),
-      title: '칭찬 삭제',
-      type: 'manner-review',
-    });
-  }
-
   function toggleEventParticipant(profile: AccountProfile) {
     setNewEvent((previousEvent) => ({
       ...previousEvent,
@@ -1775,26 +1746,15 @@ export default function App() {
                           </div>
                         </div>
                         {canManageReview ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => openEditMannerReviewModal(review)}
-                              className="flex h-7 w-7 items-center justify-center rounded-full text-gray-300 transition hover:bg-gray-100 hover:text-[#918679]"
-                              aria-label="칭찬 수정"
-                              title="수정"
-                            >
-                              <Pencil size={13} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteMannerReview(review)}
-                              className="flex h-7 w-7 items-center justify-center rounded-full text-gray-300 transition hover:bg-gray-100 hover:text-[#918679]"
-                              aria-label="칭찬 삭제"
-                              title="삭제"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            onClick={() => openEditMannerReviewModal(review)}
+                            className="flex h-7 w-7 items-center justify-center rounded-full text-gray-300 transition hover:bg-gray-100 hover:text-[#918679]"
+                            aria-label="칭찬 수정"
+                            title="수정"
+                          >
+                            <Pencil size={13} />
+                          </button>
                         ) : null}
                       </div>
                     </div>
