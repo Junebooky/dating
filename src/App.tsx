@@ -574,8 +574,8 @@ function toMannerReviewRow(review: MannerReview) {
   };
 }
 
-function getRatingTemperatureDelta(rating: MannerRating) {
-  return (rating - 3) * MANNER_RATING_STEP;
+function getMannerReviewTemperatureDelta() {
+  return MANNER_RATING_STEP;
 }
 
 function clampTemperature(value: number) {
@@ -585,8 +585,8 @@ function clampTemperature(value: number) {
 function calculateMannerTemperature(profile: AccountProfile, reviews: MannerReview[]) {
   const rawTemperature = reviews
     .filter((review) => review.targetProfile === profile)
-    .reduce((temperature, review) => {
-      return temperature + getRatingTemperatureDelta(review.rating);
+    .reduce((temperature) => {
+      return temperature + getMannerReviewTemperatureDelta();
     }, MANNER_BASE_TEMPERATURE);
 
   return Number(clampTemperature(rawTemperature).toFixed(1));
@@ -673,6 +673,7 @@ export default function App() {
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isBucketModalOpen, setIsBucketModalOpen] = useState(false);
   const [isMannerModalOpen, setIsMannerModalOpen] = useState(false);
+  const [editingMannerReviewId, setEditingMannerReviewId] = useState<number | null>(null);
   const [isWeatherPopupOpen, setIsWeatherPopupOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const [loginForm, setLoginForm] = useState({
@@ -753,6 +754,7 @@ export default function App() {
       setEditingEventId(null);
       setIsBucketModalOpen(false);
       setIsMannerModalOpen(false);
+      setEditingMannerReviewId(null);
       setMannerReviewError(null);
       setEvents([]);
       setBucketList([]);
@@ -890,6 +892,10 @@ export default function App() {
     ? calculateMannerTemperature(currentAccount.profile, mannerReviews)
     : null;
   const editingEvent = editingEventId == null ? null : events.find((event) => event.id === editingEventId);
+  const editingMannerReview =
+    editingMannerReviewId == null
+      ? null
+      : mannerReviews.find((review) => review.id === editingMannerReviewId);
   const eventModalStartDate = editingEvent?.date ?? formatYMD(selectedDate);
 
   useEffect(() => {
@@ -1206,13 +1212,30 @@ export default function App() {
       return;
     }
 
+    setEditingMannerReviewId(null);
     setMannerReviewDraft(EMPTY_MANNER_REVIEW_DRAFT);
+    setMannerReviewError(null);
+    setIsMannerModalOpen(true);
+  }
+
+  function openEditMannerReviewModal(review: MannerReview) {
+    if (currentAccount?.profile !== review.authorProfile) {
+      return;
+    }
+
+    setEditingMannerReviewId(review.id);
+    setMannerReviewDraft({
+      rating: review.rating,
+      strengths: review.strengths,
+      improvements: review.improvements,
+    });
     setMannerReviewError(null);
     setIsMannerModalOpen(true);
   }
 
   function closeMannerReviewModal() {
     setIsMannerModalOpen(false);
+    setEditingMannerReviewId(null);
     setMannerReviewDraft(EMPTY_MANNER_REVIEW_DRAFT);
     setMannerReviewError(null);
   }
@@ -1234,6 +1257,48 @@ export default function App() {
 
     if (targetProfile === currentAccount.profile) {
       setMannerReviewError('자기 자신에게는 러브온도를 남길 수 없습니다.');
+      return;
+    }
+
+    if (editingMannerReview) {
+      const nextReview: MannerReview = {
+        ...editingMannerReview,
+        strengths,
+      };
+
+      const client = getRemoteClient();
+      if (!client) {
+        return;
+      }
+
+      const { error } = await client
+        .from('manner_reviews')
+        .update({
+          strengths: nextReview.strengths,
+          improvements: nextReview.improvements,
+        })
+        .eq('id', nextReview.id);
+
+      if (error) {
+        setMannerReviewError(getRemoteErrorMessage(error));
+        return;
+      }
+
+      setMannerReviews((previousReviews) =>
+        previousReviews.map((review) => (review.id === nextReview.id ? nextReview : review)),
+      );
+      void publishPushNotification({
+        body: `${PROFILE_META[currentAccount.profile].displayName}님이 칭찬을 수정했어요.`,
+        tag: `manner-${nextReview.id}`,
+        targetProfiles: getNotificationTargetProfiles([
+          nextReview.authorProfile,
+          nextReview.targetProfile,
+        ]),
+        title: '칭찬 수정',
+        type: 'manner-review',
+      });
+      closeMannerReviewModal();
+      setActiveTab('manner');
       return;
     }
 
@@ -1270,6 +1335,35 @@ export default function App() {
     });
     closeMannerReviewModal();
     setActiveTab('manner');
+  }
+
+  async function deleteMannerReview(review: MannerReview) {
+    if (currentAccount?.profile !== review.authorProfile) {
+      return;
+    }
+
+    const client = getRemoteClient();
+    if (!client) {
+      return;
+    }
+
+    const { error } = await client.from('manner_reviews').delete().eq('id', review.id);
+
+    if (error) {
+      setDataError(getRemoteErrorMessage(error));
+      return;
+    }
+
+    setMannerReviews((previousReviews) =>
+      previousReviews.filter((previousReview) => previousReview.id !== review.id),
+    );
+    void publishPushNotification({
+      body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 칭찬을 삭제했어요.`,
+      tag: `manner-${review.id}`,
+      targetProfiles: getNotificationTargetProfiles([review.authorProfile, review.targetProfile]),
+      title: '칭찬 삭제',
+      type: 'manner-review',
+    });
   }
 
   function toggleEventParticipant(profile: AccountProfile) {
@@ -1648,7 +1742,8 @@ export default function App() {
             <div>
               {recentReviews.map((review) => {
                 const authorMeta = PROFILE_META[review.authorProfile];
-                const reviewDelta = getRatingTemperatureDelta(review.rating);
+                const canManageReview = currentAccount?.profile === review.authorProfile;
+                const reviewDelta = getMannerReviewTemperatureDelta();
 
                 return (
                   <div
@@ -1664,19 +1759,43 @@ export default function App() {
                           </span>
                         </p>
                       </div>
-                      <div className="text-right">
-                        <span
-                          className="rounded-full px-2 py-0.5 text-[10px] font-black"
-                          style={{
-                            backgroundColor: reviewDelta >= 0 ? '#FBEFEF' : '#EEF4FB',
-                            color: reviewDelta >= 0 ? '#D48787' : '#6F99C7',
-                          }}
-                        >
-                          {formatSignedTemperatureDelta(reviewDelta)}
-                        </span>
-                        <div className="mt-1 text-[10px] font-bold text-gray-400">
-                          {MANNER_STATUS_LABELS[review.status]}
+                      <div className="flex shrink-0 items-start gap-1">
+                        <div className="mr-1 text-right">
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[10px] font-black"
+                            style={{
+                              backgroundColor: reviewDelta >= 0 ? '#FBEFEF' : '#EEF4FB',
+                              color: reviewDelta >= 0 ? '#D48787' : '#6F99C7',
+                            }}
+                          >
+                            {formatSignedTemperatureDelta(reviewDelta)}
+                          </span>
+                          <div className="mt-1 text-[10px] font-bold text-gray-400">
+                            {MANNER_STATUS_LABELS[review.status]}
+                          </div>
                         </div>
+                        {canManageReview ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openEditMannerReviewModal(review)}
+                              className="flex h-7 w-7 items-center justify-center rounded-full text-gray-300 transition hover:bg-gray-100 hover:text-[#918679]"
+                              aria-label="칭찬 수정"
+                              title="수정"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteMannerReview(review)}
+                              className="flex h-7 w-7 items-center justify-center rounded-full text-gray-300 transition hover:bg-gray-100 hover:text-[#918679]"
+                              aria-label="칭찬 삭제"
+                              title="삭제"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </div>
 
@@ -2732,11 +2851,21 @@ export default function App() {
               <form className="w-full rounded-t-[32px] bg-white p-8" onSubmit={submitMannerReview}>
                 <div className="mb-6 flex items-center justify-between">
                   <div>
-                    <h3 className="text-xl font-bold text-[#2f2417]">칭찬 남기기</h3>
-                    {currentPartnerProfile ? (
+                    <h3 className="text-xl font-bold text-[#2f2417]">
+                      {editingMannerReview ? '칭찬 수정하기' : '칭찬 남기기'}
+                    </h3>
+                    {(editingMannerReview || currentPartnerProfile) ? (
                       <p className="mt-1 text-sm text-[#8d7558]">
-                        {PROFILE_META[currentPartnerProfile].emoji}{' '}
-                        {PROFILE_META[currentPartnerProfile].displayName}에게만 남겨집니다.
+                        {
+                          PROFILE_META[
+                            editingMannerReview?.targetProfile ?? currentPartnerProfile!
+                          ].emoji
+                        }{' '}
+                        {
+                          PROFILE_META[
+                            editingMannerReview?.targetProfile ?? currentPartnerProfile!
+                          ].displayName
+                        }에게만 남겨집니다.
                       </p>
                     ) : null}
                   </div>
@@ -2778,7 +2907,7 @@ export default function App() {
                     type="submit"
                     className="w-full rounded-2xl bg-[#A594F9] py-4 font-bold text-white"
                   >
-                    칭찬 남기기
+                    {editingMannerReview ? '수정 완료' : '칭찬 남기기'}
                   </button>
                 </div>
               </form>
