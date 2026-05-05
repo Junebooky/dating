@@ -148,6 +148,9 @@ const MANNER_BASE_TEMPERATURE = 36.5;
 const MANNER_RATING_STEP = 0.1;
 const MANNER_MIN_TEMPERATURE = 30;
 const MANNER_MAX_TEMPERATURE = 45;
+const LOVE_START_DATE = new Date(2026, 1, 14);
+const LOVE_GOAL_DAYS = 1000;
+const LOVE_MILESTONE_DAYS = Array.from({ length: 10 }, (_, index) => (index + 1) * 100);
 const CALENDAR_CELL_TITLE_MAX_LENGTH = 18;
 const EVENT_MEMO_META_PREFIX = '__dear_days_event_meta__';
 
@@ -164,8 +167,8 @@ const PROFILE_META: Record<
   AccountProfile,
   { displayName: string; emoji: string; label: string }
 > = {
-  boyfriend: { emoji: '👨', label: '남자친구', displayName: '태준씌' },
-  girlfriend: { emoji: '👩', label: '여자친구', displayName: '영주씌' },
+  boyfriend: { emoji: '🧑🏽', label: '남자친구', displayName: '태준씌' },
+  girlfriend: { emoji: '👱🏻‍♀️', label: '여자친구', displayName: '영주씌' },
 };
 
 const CALENDAR_EVENT_TONES: Record<
@@ -617,6 +620,36 @@ function formatCalendarDateLabel(dateKey: string) {
   return `${Number(month)}월 ${Number(day)}일`;
 }
 
+function getLoveDayCount(today = new Date()) {
+  const startDate = new Date(
+    LOVE_START_DATE.getFullYear(),
+    LOVE_START_DATE.getMonth(),
+    LOVE_START_DATE.getDate(),
+  );
+  const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const diffTime = todayDate.getTime() - startDate.getTime();
+
+  return Math.max(0, Math.floor(diffTime / 86_400_000));
+}
+
+function getLoveProgressPercent(dayCount: number) {
+  return Math.min(100, Math.max(0, (dayCount / LOVE_GOAL_DAYS) * 100));
+}
+
+function getLoveMilestoneDate(day: number) {
+  const milestoneDate = new Date(LOVE_START_DATE);
+  milestoneDate.setDate(LOVE_START_DATE.getDate() + day - 1);
+
+  return milestoneDate;
+}
+
+function formatLoveMilestoneDate(date: Date) {
+  return `${String(date.getFullYear()).slice(2)}.${String(date.getMonth() + 1).padStart(
+    2,
+    '0',
+  )}.${String(date.getDate()).padStart(2, '0')}`;
+}
+
 function loadLocation() {
   return {
     ...DEFAULT_LOCATION,
@@ -891,6 +924,9 @@ export default function App() {
   const currentMannerTemperature = currentAccount
     ? calculateMannerTemperature(currentAccount.profile, mannerReviews)
     : null;
+  const loveDayCount = getLoveDayCount();
+  const loveProgressPercent = getLoveProgressPercent(loveDayCount);
+  const loveRunnerPosition = Math.min(96, Math.max(4, loveProgressPercent));
   const editingEvent = editingEventId == null ? null : events.find((event) => event.id === editingEventId);
   const editingMannerReview =
     editingMannerReviewId == null
@@ -2181,6 +2217,70 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {activeTab === 'calendar' ? (
+          <div className="border-b border-[#f1e6d8] bg-[#FDFBF8] px-4 pb-5 pt-4">
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#9d7b52]">
+                  Love Run
+                </p>
+                <h2 className="mt-1 text-sm font-black text-[#2f2417]">
+                  2026.02.14 시작
+                </h2>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[10px] font-bold text-[#918679]">1000일 여정</p>
+                <p className="mt-0.5 text-xs font-black text-[#A594F9]">
+                  {Math.round(loveProgressPercent)}%
+                </p>
+              </div>
+            </div>
+
+            <div className="relative pb-9 pt-8">
+              <div className="absolute left-0 right-0 top-8 h-3 overflow-hidden rounded-full bg-[#F4F1EC]">
+                <div
+                  className="h-full rounded-full bg-[#A594F9]"
+                  style={{ width: `${loveProgressPercent}%` }}
+                />
+              </div>
+
+              {LOVE_MILESTONE_DAYS.map((day) => {
+                const markerPosition = (day / LOVE_GOAL_DAYS) * 100;
+                const markerLabelPosition = Math.min(98, Math.max(2, markerPosition));
+                const milestoneDate = formatLoveMilestoneDate(getLoveMilestoneDate(day));
+
+                return (
+                  <div
+                    key={day}
+                    className="absolute top-7 flex w-10 -translate-x-1/2 flex-col items-center"
+                    style={{ left: `${markerLabelPosition}%` }}
+                  >
+                    <span className="h-5 w-px bg-[#ded6c9]" />
+                    <span className="mt-1 whitespace-nowrap text-[8px] font-black leading-none text-[#b3a696]">
+                      {day}일
+                    </span>
+                    <span className="mt-0.5 whitespace-nowrap text-[7px] font-bold leading-none text-[#c1b5a7]">
+                      {milestoneDate}
+                    </span>
+                  </div>
+                );
+              })}
+
+              <div
+                className="absolute top-0 flex -translate-x-1/2 flex-col items-center"
+                style={{ left: `${loveRunnerPosition}%` }}
+              >
+                <div className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-[#7D6DE0] shadow-[0_6px_16px_rgba(66,45,18,0.1)]">
+                  +{loveDayCount}일
+                </div>
+                <div className="mt-1 flex h-8 items-center justify-center text-2xl leading-none">
+                  <span aria-hidden="true">👫</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="relative flex-1 overflow-hidden">
           <div className="h-full overflow-y-auto pb-28">
