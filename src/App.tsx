@@ -81,6 +81,7 @@ interface MannerReview {
 
 interface Account {
   email: string;
+  emailAliases?: string[];
   profile: AccountProfile;
   username: string;
 }
@@ -200,8 +201,9 @@ const MANNER_STATUS_LABELS: Record<MannerReviewStatus, string> = {
 
 const DEFAULT_ACCOUNTS: Account[] = [
   {
-    username: 'yeongjoo0214',
-    email: 'yeongjoo0214@couple.local',
+    username: 'yeongju0214',
+    email: 'yeongju0214@couple.local',
+    emailAliases: ['yeongjoo0214@couple.local'],
     profile: 'girlfriend',
   },
   {
@@ -258,7 +260,13 @@ function findAccountByEmail(accounts: Account[], email?: string | null) {
     return undefined;
   }
 
-  return accounts.find((account) => account.email.toLowerCase() === email.toLowerCase());
+  const normalizedEmail = email.toLowerCase();
+
+  return accounts.find((account) =>
+    [account.email, ...(account.emailAliases ?? [])].some(
+      (accountEmail) => accountEmail.toLowerCase() === normalizedEmail,
+    ),
+  );
 }
 
 function isAccountProfile(value: unknown): value is AccountProfile {
@@ -1305,17 +1313,27 @@ export default function App() {
       return;
     }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: matchedAccount.email,
-      password,
-    });
+    const signInEmails = [matchedAccount.email, ...(matchedAccount.emailAliases ?? [])];
+    let lastSignInError: unknown = null;
 
-    if (error) {
+    for (const email of signInEmails) {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (!error) {
+        setLoginError(null);
+        return;
+      }
+
+      lastSignInError = error;
+    }
+
+    if (lastSignInError) {
       setLoginError('아이디 또는 비밀번호가 맞지 않습니다.');
       return;
     }
-
-    setLoginError(null);
   }
 
   async function handleLogout() {

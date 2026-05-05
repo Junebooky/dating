@@ -10,7 +10,12 @@ const ACCOUNT_BY_EMAIL = {
   'yeongjoo0214@couple.local': {
     email: 'yeongjoo0214@couple.local',
     profile: 'girlfriend',
-    username: 'yeongjoo0214',
+    username: 'yeongju0214',
+  },
+  'yeongju0214@couple.local': {
+    email: 'yeongju0214@couple.local',
+    profile: 'girlfriend',
+    username: 'yeongju0214',
   },
 };
 

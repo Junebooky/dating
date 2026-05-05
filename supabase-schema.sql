@@ -106,13 +106,15 @@ to authenticated
 using (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 )
 with check (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 );
 
@@ -124,13 +126,15 @@ to authenticated
 using (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 )
 with check (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 );
 
@@ -142,13 +146,15 @@ to authenticated
 using (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 )
 with check (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 );
 
@@ -160,13 +166,15 @@ to authenticated
 using (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 )
 with check (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 );
 
@@ -178,7 +186,8 @@ to authenticated
 using (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 );
 
@@ -190,6 +199,7 @@ to authenticated
 with check (
   (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
-    'yeongjoo0214@couple.local'
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
   )
 );
