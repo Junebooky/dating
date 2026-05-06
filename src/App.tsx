@@ -709,6 +709,7 @@ export default function App() {
   const [editingMannerReviewId, setEditingMannerReviewId] = useState<number | null>(null);
   const [isWeatherPopupOpen, setIsWeatherPopupOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
+  const [editingBucketItemId, setEditingBucketItemId] = useState<number | null>(null);
   const [loginForm, setLoginForm] = useState({
     username: DEFAULT_ACCOUNTS[0].username,
     password: '',
@@ -786,6 +787,7 @@ export default function App() {
       setLocationError(null);
       setEditingEventId(null);
       setIsBucketModalOpen(false);
+      setEditingBucketItemId(null);
       setIsMannerModalOpen(false);
       setEditingMannerReviewId(null);
       setMannerReviewError(null);
@@ -928,6 +930,8 @@ export default function App() {
   const loveProgressPercent = getLoveProgressPercent(loveDayCount);
   const loveRunnerPosition = Math.min(96, Math.max(4, loveProgressPercent));
   const editingEvent = editingEventId == null ? null : events.find((event) => event.id === editingEventId);
+  const editingBucketItem =
+    editingBucketItemId == null ? null : bucketList.find((item) => item.id === editingBucketItemId);
   const editingMannerReview =
     editingMannerReviewId == null
       ? null
@@ -1234,12 +1238,23 @@ export default function App() {
   }
 
   function openBucketModal() {
+    setEditingBucketItemId(null);
     setBucketDraft(EMPTY_BUCKET_DRAFT);
+    setIsBucketModalOpen(true);
+  }
+
+  function openEditBucketModal(item: BucketItem) {
+    setEditingBucketItemId(item.id);
+    setBucketDraft({
+      text: item.text,
+      status: item.status,
+    });
     setIsBucketModalOpen(true);
   }
 
   function closeBucketModal() {
     setIsBucketModalOpen(false);
+    setEditingBucketItemId(null);
     setBucketDraft(EMPTY_BUCKET_DRAFT);
   }
 
@@ -1639,6 +1654,34 @@ export default function App() {
 
     const client = getRemoteClient();
     if (!client) {
+      return;
+    }
+
+    if (editingBucketItem) {
+      const nextItem: BucketItem = {
+        ...editingBucketItem,
+        text,
+        status: bucketDraft.status,
+      };
+      const { error } = await client.from('bucket_items').upsert(toBucketItemRow(nextItem));
+
+      if (error) {
+        setDataError(getRemoteErrorMessage(error));
+        return;
+      }
+
+      setBucketList((previousItems) =>
+        previousItems.map((item) => (item.id === nextItem.id ? nextItem : item)),
+      );
+      setBucketFilter(nextItem.status);
+      void publishPushNotification({
+        body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 "${nextItem.text}" 항목을 수정했어요.`,
+        tag: `bucket-${nextItem.id}`,
+        targetProfiles: getNotificationTargetProfiles(),
+        title: '버킷리스트 수정',
+        type: 'bucket-item',
+      });
+      closeBucketModal();
       return;
     }
 
@@ -2620,6 +2663,15 @@ export default function App() {
                           </span>
                           <button
                             type="button"
+                            onClick={() => openEditBucketModal(item)}
+                            className="p-1 text-[#B8AEA5] transition hover:text-[#7F766E]"
+                            aria-label="버킷리스트 수정"
+                            title="수정"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => deleteBucketItem(item.id)}
                             className="p-1 text-[#B8AEA5] transition hover:text-[#7F766E]"
                             aria-label="버킷리스트 삭제"
@@ -2841,8 +2893,14 @@ export default function App() {
               <form className="w-full rounded-t-[32px] bg-white p-8" onSubmit={addBucketItem}>
                 <div className="mb-6 flex items-center justify-between">
                   <div>
-                    <h3 className="text-xl font-bold text-[#2f2417]">버킷리스트 추가</h3>
-                    <p className="mt-1 text-sm text-[#8d7558]">함께하고 싶은 일을 하나씩 쌓아두세요.</p>
+                    <h3 className="text-xl font-bold text-[#2f2417]">
+                      {editingBucketItem ? '버킷리스트 수정' : '버킷리스트 추가'}
+                    </h3>
+                    <p className="mt-1 text-sm text-[#8d7558]">
+                      {editingBucketItem
+                        ? '내용과 상태를 다시 정리해 두세요.'
+                        : '함께하고 싶은 일을 하나씩 쌓아두세요.'}
+                    </p>
                   </div>
                   <button
                     type="button"
@@ -2899,7 +2957,7 @@ export default function App() {
                     type="submit"
                     className="w-full rounded-2xl bg-[#A594F9] py-4 font-bold text-white"
                   >
-                    추가 완료
+                    {editingBucketItem ? '수정 완료' : '추가 완료'}
                   </button>
                 </div>
               </form>
@@ -2975,9 +3033,9 @@ export default function App() {
           ) : null}
 
           {isAccountModalOpen ? (
-            <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/20 backdrop-blur-sm">
-              <div className="w-full rounded-t-[32px] bg-white p-8">
-                <div className="mb-6 flex items-center justify-between">
+            <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/20 px-5 pt-10 backdrop-blur-sm">
+              <div className="max-h-[calc(100%-5rem)] w-full overflow-y-auto rounded-[28px] bg-white p-5 shadow-[0_24px_70px_rgba(44,32,20,0.2)]">
+                <div className="mb-4 flex items-center justify-between">
                   <div>
                     <h3 className="text-xl font-bold text-[#2f2417]">계정 설정</h3>
                     <p className="mt-1 text-sm text-[#8d7558]">
@@ -2995,7 +3053,7 @@ export default function App() {
                 </div>
 
                 {currentAccount ? (
-                  <div className="rounded-2xl bg-gray-50 px-4 py-4">
+                  <div className="rounded-2xl bg-gray-50 px-4 py-3.5">
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#9d7b52]">
                       Account
                     </p>
@@ -3007,7 +3065,7 @@ export default function App() {
                   </div>
                 ) : null}
 
-                <div className="mt-3 rounded-2xl bg-[#F8F5EF] px-4 py-4">
+                <div className="mt-3 rounded-2xl bg-[#F8F5EF] px-4 py-3.5">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#9d7b52]">
@@ -3041,7 +3099,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#f0ddd2] py-4 font-semibold text-[#9a4d32]"
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#f0ddd2] py-3.5 font-semibold text-[#9a4d32]"
                 >
                   <LogOut size={16} />
                   로그아웃
