@@ -46,6 +46,21 @@ export interface Precipitation {
   snowQpf?: QuantitativePrecipitationForecast;
 }
 
+export interface WeatherEnvironmentMetric {
+  grade?: string;
+  source?: string;
+  unit?: string;
+  value?: number;
+}
+
+export interface WeatherEnvironment {
+  pm10?: WeatherEnvironmentMetric;
+  pm25?: WeatherEnvironmentMetric;
+  sunriseTime?: string;
+  sunsetTime?: string;
+  uvIndex?: WeatherEnvironmentMetric;
+}
+
 export interface CurrentConditionsResponse {
   currentTime?: string;
   timeZone?: {
@@ -58,6 +73,7 @@ export interface CurrentConditionsResponse {
   wind?: Wind;
   isDaytime?: boolean;
   relativeHumidity?: number;
+  environment?: WeatherEnvironment;
 }
 
 export interface DisplayDateTime {
@@ -121,6 +137,12 @@ export interface HourlyWeatherItem {
   windSpeed: number;
   iconUrl: string | null;
   description: string;
+  pm10?: number;
+  pm10Grade?: string;
+  pm25?: number;
+  pm25Grade?: string;
+  uvGrade?: string;
+  uvIndex?: number;
 }
 
 export interface DailyWeatherItem {
@@ -131,6 +153,8 @@ export interface DailyWeatherItem {
   description: string;
   maxTemperature: number;
   minTemperature: number;
+  sunriseTime?: string;
+  sunsetTime?: string;
 }
 
 export interface WeatherLocation {
@@ -148,6 +172,8 @@ export interface WeatherSnapshot {
   daily: DailyWeatherItem[];
   timeZoneId: string;
   location: WeatherLocation;
+  provider?: 'kma' | 'open-meteo';
+  providerLabel?: string;
 }
 
 interface OpenMeteoCurrentResponse {
@@ -194,7 +220,8 @@ interface WeatherPresentation {
   symbol: string;
 }
 
-const WEATHER_API_BASE_URL = 'https://api.open-meteo.com/v1/forecast';
+const OPEN_METEO_API_BASE_URL = 'https://api.open-meteo.com/v1/forecast';
+const KMA_WEATHER_API_PATH = '/api/weather/kma';
 const DAILY_FORECAST_COUNT = 5;
 
 export const DEFAULT_LOCATION: WeatherLocation = {
@@ -302,7 +329,7 @@ function buildWeatherApiUrl(
   longitude: number,
   extraParams: Record<string, string | number> = {},
 ) {
-  const url = new URL(WEATHER_API_BASE_URL);
+  const url = new URL(OPEN_METEO_API_BASE_URL);
 
   url.searchParams.set('latitude', String(latitude));
   url.searchParams.set('longitude', String(longitude));
@@ -342,6 +369,27 @@ function buildWeatherApiUrl(
   return url.toString();
 }
 
+function buildKmaWeatherApiUrl(
+  location: WeatherLocation,
+  extraParams: Record<string, string | number> = {},
+) {
+  const params = new URLSearchParams({
+    label: location.label,
+    latitude: String(location.latitude),
+    longitude: String(location.longitude),
+    source: location.source,
+  });
+
+  if (location.coordsLabel) {
+    params.set('coordsLabel', location.coordsLabel);
+  }
+  Object.entries(extraParams).forEach(([key, value]) => {
+    params.set(key, String(value));
+  });
+
+  return `${KMA_WEATHER_API_PATH}?${params.toString()}`;
+}
+
 async function fetchWeatherResource<T>(url: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(url, { signal });
 
@@ -349,9 +397,14 @@ async function fetchWeatherResource<T>(url: string, signal: AbortSignal): Promis
     let message = `날씨 API 요청에 실패했습니다. (${response.status})`;
 
     try {
-      const errorBody = (await response.json()) as { reason?: string; error?: boolean };
+      const errorBody = (await response.json()) as {
+        error?: boolean | string;
+        reason?: string;
+      };
       if (errorBody.reason) {
         message = errorBody.reason;
+      } else if (typeof errorBody.error === 'string') {
+        message = errorBody.error;
       }
     } catch {
       // Keep the generic error message when parsing fails.
@@ -365,6 +418,10 @@ async function fetchWeatherResource<T>(url: string, signal: AbortSignal): Promis
 
 export function roundTemperature(value?: TemperatureValue) {
   return value?.degrees == null ? 0 : Math.round(value.degrees);
+}
+
+export function formatTemperature(value?: TemperatureValue) {
+  return value?.degrees == null ? '--' : value.degrees.toFixed(1);
 }
 
 export function getPrecipitationPercent(precipitation?: Precipitation) {
@@ -392,6 +449,30 @@ export function formatWindSpeed(wind?: Wind) {
   }
 
   return `${Math.round(value)}`;
+}
+
+export function formatEnvironmentMetric(metric?: WeatherEnvironmentMetric) {
+  return metric?.grade ?? '-';
+}
+
+export function formatSunTime(timestamp?: string) {
+  if (!timestamp) {
+    return '-';
+  }
+
+  const timePart = timestamp.includes('T') ? timestamp.split('T')[1] : timestamp;
+  const [hourText, minuteText = '00'] = timePart.split(':');
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  if (Number.isNaN(hour) || Number.isNaN(minute)) {
+    return '-';
+  }
+
+  const meridiem = hour < 12 ? '오전' : '오후';
+  const normalizedHour = hour % 12 === 0 ? 12 : hour % 12;
+
+  return `${meridiem} ${normalizedHour}:${String(minute).padStart(2, '0')}`;
 }
 
 export function buildWeatherIconUrl(condition?: WeatherCondition) {
@@ -621,14 +702,83 @@ function findCurrentHourlyIndex(currentTime?: string, hourlyTimes?: string[]) {
   return hourlyTimes.findIndex((hourlyTime) => hourlyTime.slice(0, 13) === currentHourKey);
 }
 
-export async function fetchWeatherSnapshot(
+async function fetchKmaWeatherSnapshot(
   location: WeatherLocation,
   signal: AbortSignal,
 ): Promise<WeatherSnapshot> {
-  const forecast = await fetchWeatherResource<OpenMeteoForecastResponse>(
-    buildWeatherApiUrl(location.latitude, location.longitude),
+  const snapshot = await fetchWeatherResource<WeatherSnapshot>(
+    buildKmaWeatherApiUrl(location),
     signal,
   );
+
+  return {
+    ...snapshot,
+    location: {
+      ...location,
+      ...snapshot.location,
+      updatedAt: location.updatedAt,
+    },
+    provider: snapshot.provider ?? 'kma',
+    providerLabel: snapshot.providerLabel ?? '기상청 위치기반 날씨',
+  };
+}
+
+async function fetchWeatherEnvironmentSnapshot(
+  location: WeatherLocation,
+  signal: AbortSignal,
+): Promise<WeatherSnapshot | null> {
+  try {
+    return await fetchWeatherResource<WeatherSnapshot>(
+      buildKmaWeatherApiUrl(location, { environmentOnly: 1 }),
+      signal,
+    );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
+
+    console.warn('Weather environment fallback failed.', error);
+    return null;
+  }
+}
+
+function mergeHourlyEnvironment(
+  hourly: HourlyWeatherItem[],
+  environmentHourly: HourlyWeatherItem[] = [],
+) {
+  const environmentByKey = new Map(
+    environmentHourly.map((item) => [`${item.dateKey}-${item.timeLabel}`, item]),
+  );
+
+  return hourly.map((item) => ({
+    ...item,
+    ...environmentByKey.get(`${item.dateKey}-${item.timeLabel}`),
+  }));
+}
+
+function mergeDailyEnvironment(
+  daily: DailyWeatherItem[],
+  environmentDaily: DailyWeatherItem[] = [],
+) {
+  const environmentByDate = new Map(environmentDaily.map((item) => [item.dateKey, item]));
+
+  return daily.map((item) => ({
+    ...item,
+    ...environmentByDate.get(item.dateKey),
+  }));
+}
+
+async function fetchOpenMeteoWeatherSnapshot(
+  location: WeatherLocation,
+  signal: AbortSignal,
+): Promise<WeatherSnapshot> {
+  const [forecast, environmentSnapshot] = await Promise.all([
+    fetchWeatherResource<OpenMeteoForecastResponse>(
+      buildWeatherApiUrl(location.latitude, location.longitude),
+      signal,
+    ),
+    fetchWeatherEnvironmentSnapshot(location, signal),
+  ]);
   const timeZoneId = forecast.timezone ?? 'Asia/Seoul';
   const utcOffsetSeconds = forecast.utc_offset_seconds ?? 0;
   const currentWeather = forecast.current;
@@ -680,38 +830,66 @@ export async function fetchWeatherSnapshot(
     relativeHumidity: currentWeather?.relative_humidity_2m,
   };
 
+  const hourly = (hourlyWeather?.time ?? []).map((time, index) => {
+    const weatherPresentation = getWeatherPresentation(
+      hourlyWeather?.weather_code?.[index],
+      hourlyWeather?.is_day?.[index] === 1,
+    );
+
     return {
-      current: currentConditions,
-      hourly: (hourlyWeather?.time ?? []).map((time, index) => {
-        const weatherPresentation = getWeatherPresentation(
-          hourlyWeather?.weather_code?.[index],
-        hourlyWeather?.is_day?.[index] === 1,
-      );
+      dateKey: time.slice(0, 10),
+      timeLabel: formatHourlyLabel(parseOpenMeteoDisplayTime(time)),
+      temperature: Number((hourlyWeather?.temperature_2m?.[index] ?? 0).toFixed(1)),
+      precipitationPercent: hourlyWeather?.precipitation_probability?.[index] ?? 0,
+      windSpeed: Math.round(hourlyWeather?.wind_speed_10m?.[index] ?? 0),
+      iconUrl: createEmojiIconDataUri(weatherPresentation.symbol),
+      description: weatherPresentation.description,
+    };
+  });
+  const daily = (dailyWeather?.time ?? []).map((date, index) => {
+    const weatherPresentation = getWeatherPresentation(dailyWeather?.weather_code?.[index], true);
 
-      return {
-        dateKey: time.slice(0, 10),
-        timeLabel: formatHourlyLabel(parseOpenMeteoDisplayTime(time)),
-        temperature: Math.round(hourlyWeather?.temperature_2m?.[index] ?? 0),
-        precipitationPercent: hourlyWeather?.precipitation_probability?.[index] ?? 0,
-        windSpeed: Math.round(hourlyWeather?.wind_speed_10m?.[index] ?? 0),
-        iconUrl: createEmojiIconDataUri(weatherPresentation.symbol),
-        description: weatherPresentation.description,
-      };
-    }),
-    daily: (dailyWeather?.time ?? []).map((date, index) => {
-      const weatherPresentation = getWeatherPresentation(dailyWeather?.weather_code?.[index], true);
+    return {
+      dateKey: date,
+      dayLabel: formatDayLabel(parseOpenMeteoDisplayDate(date)),
+      fullLabel: formatFullDayLabel(date),
+      iconUrl: createEmojiIconDataUri(weatherPresentation.symbol),
+      description: weatherPresentation.description,
+      maxTemperature: Number((dailyWeather?.temperature_2m_max?.[index] ?? 0).toFixed(1)),
+      minTemperature: Number((dailyWeather?.temperature_2m_min?.[index] ?? 0).toFixed(1)),
+    };
+  });
 
-      return {
-        dateKey: date,
-        dayLabel: formatDayLabel(parseOpenMeteoDisplayDate(date)),
-        fullLabel: formatFullDayLabel(date),
-        iconUrl: createEmojiIconDataUri(weatherPresentation.symbol),
-        description: weatherPresentation.description,
-        maxTemperature: Math.round(dailyWeather?.temperature_2m_max?.[index] ?? 0),
-        minTemperature: Math.round(dailyWeather?.temperature_2m_min?.[index] ?? 0),
-      };
-    }),
+  return {
+    current: {
+      ...currentConditions,
+      environment: environmentSnapshot?.current.environment,
+    },
+    hourly: mergeHourlyEnvironment(hourly, environmentSnapshot?.hourly),
+    daily: mergeDailyEnvironment(daily, environmentSnapshot?.daily),
     timeZoneId,
     location,
+    provider: 'open-meteo',
+    providerLabel: environmentSnapshot?.providerLabel ?? '백업 날씨',
   };
+}
+
+export async function fetchWeatherSnapshot(
+  location: WeatherLocation,
+  signal: AbortSignal,
+): Promise<WeatherSnapshot> {
+  try {
+    return await fetchKmaWeatherSnapshot(location, signal);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error;
+    }
+
+    if (error instanceof Error && error.message.includes('기상청 API 키')) {
+      throw error;
+    }
+
+    console.warn('KMA weather fallback activated.', error);
+    return fetchOpenMeteoWeatherSnapshot(location, signal);
+  }
 }

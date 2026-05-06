@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Droplets, Wind, X } from 'lucide-react';
+import { CloudSun, Droplets, MapPin, Sparkles, Sun, Wind, X } from 'lucide-react';
 
 import {
   buildWeatherIconUrl,
   formatCurrentDateTime,
-  formatWindSpeed,
-  getPrecipitationPercent,
-  roundTemperature,
+  formatSunTime,
+  formatTemperature,
   type WeatherSnapshot,
 } from '../lib/weather';
 
 interface WeatherPopupProps {
-  coordsLabel?: string;
   errorMessage: string | null;
   isLoading: boolean;
   isOpen: boolean;
@@ -139,8 +137,47 @@ function buildChart(hourly: WeatherSnapshot['hourly']) {
   };
 }
 
+function formatHourlyEnvironmentValue(grade?: string) {
+  return grade ?? '-';
+}
+
+function formatHourlyTemperature(value: number) {
+  return value.toFixed(1);
+}
+
+function getEnvironmentGradeClass(grade?: string) {
+  if (grade === '매우좋음') {
+    return 'text-[#8FB9DD]';
+  }
+  if (grade === '좋음') {
+    return 'text-[#9FBFA8]';
+  }
+  if (grade === '낮음') {
+    return 'text-[#8FB9DD]';
+  }
+  if (grade === '보통') {
+    return 'text-[#D6B56D]';
+  }
+  if (grade === '높음') {
+    return 'text-[#D89A8F]';
+  }
+  if (grade === '매우높음') {
+    return 'text-[#E89B9B]';
+  }
+  if (grade === '위험') {
+    return 'text-[#F0A0A0]';
+  }
+  if (grade === '나쁨') {
+    return 'text-[#D89A8F]';
+  }
+  if (grade === '매우나쁨') {
+    return 'text-[#E89B9B]';
+  }
+
+  return 'text-gray-500';
+}
+
 export function GoogleWeatherPopup({
-  coordsLabel,
   errorMessage,
   isLoading,
   isOpen,
@@ -185,30 +222,34 @@ export function GoogleWeatherPopup({
   }
 
   const current = weatherData?.current;
-  const currentTemperature = roundTemperature(current?.temperature);
+  const currentTemperature = formatTemperature(current?.temperature);
   const currentConditionText = current?.weatherCondition?.description?.text ?? '날씨 정보 없음';
   const currentIconUrl = buildWeatherIconUrl(current?.weatherCondition);
   const currentDateTime = formatCurrentDateTime(current?.currentTime, weatherData?.timeZoneId);
-  const precipitationPercent = getPrecipitationPercent(current?.precipitation);
-  const humidityText = current?.relativeHumidity == null ? '-' : `${current.relativeHumidity}%`;
-  const windSpeed = formatWindSpeed(current?.wind);
   const chart = buildChart(selectedHourly);
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-      <div className="relative w-full max-w-sm overflow-hidden rounded-[32px] bg-white shadow-2xl">
+    <div className="absolute inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pb-4 pt-4 backdrop-blur-sm">
+      <div className="relative max-h-[calc(100%-1rem)] w-full max-w-sm overflow-hidden rounded-[32px] bg-white shadow-2xl">
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 z-10 rounded-full bg-gray-100 p-2 hover:bg-gray-200"
+          className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/12 text-white transition hover:bg-white/20"
           aria-label="날씨 팝업 닫기"
         >
           <X size={20} />
         </button>
 
-        <div className="bg-[#212121] p-6 text-white">
-          <div className="mb-6 flex items-start justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/8">
+        <div className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-[#212121] p-6 text-white">
+          <div className="mb-4 pr-12">
+            <div className="inline-flex max-w-full items-start gap-1.5 rounded-full bg-white/8 px-3 py-1.5 text-[12px] font-semibold leading-4 text-gray-100">
+              <MapPin size={13} className="mt-0.5 shrink-0 text-gray-300" />
+              <span className="min-w-0 whitespace-normal break-keep">
+                {locationLabel} 날씨
+              </span>
+            </div>
+
+            <div className="mt-4 flex items-end gap-3">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-white/8">
                 {currentIconUrl ? (
                   <img
                     src={currentIconUrl}
@@ -226,17 +267,17 @@ export function GoogleWeatherPopup({
                 </div>
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-xl font-bold">{locationLabel} 날씨</div>
-              <div className="text-sm text-gray-400">{currentDateTime}</div>
-              <div className="text-sm text-gray-400">{currentConditionText}</div>
-              {coordsLabel ? <div className="text-xs text-gray-500">{coordsLabel}</div> : null}
+
+            <div className="ml-auto mt-3 flex max-w-[78%] flex-wrap items-center justify-end gap-x-2 gap-y-1 text-right text-sm text-gray-400">
+              <span>{currentDateTime}</span>
+              <span aria-hidden="true">·</span>
+              <span>{currentConditionText}</span>
             </div>
           </div>
 
           {isLoading && !weatherData ? (
             <div className="py-12 text-center text-sm text-gray-300">
-              서울 기준 날씨를 불러오는 중입니다.
+              현재 위치 기준 날씨를 불러오는 중입니다.
             </div>
           ) : errorMessage ? (
             <div className="rounded-2xl border border-red-400/20 bg-red-500/10 p-4 text-sm text-red-200">
@@ -244,30 +285,6 @@ export function GoogleWeatherPopup({
             </div>
           ) : weatherData ? (
             <>
-              <div className="mb-6 grid grid-cols-3 gap-2 text-xs text-gray-200">
-                <div className="rounded-2xl bg-white/6 px-3 py-2">
-                  <div className="text-[11px] text-gray-400">현재 강수확률</div>
-                  <div className="mt-1 font-semibold text-white">{precipitationPercent}%</div>
-                </div>
-                <div className="rounded-2xl bg-white/6 px-3 py-2">
-                  <div className="text-[11px] text-gray-400">현재 습도</div>
-                  <div className="mt-1 font-semibold text-white">{humidityText}</div>
-                </div>
-                <div className="rounded-2xl bg-white/6 px-3 py-2">
-                  <div className="text-[11px] text-gray-400">현재 바람</div>
-                  <div className="mt-1 font-semibold text-white">{windSpeed}</div>
-                </div>
-              </div>
-
-              <div className="mb-4">
-                <div className="text-sm font-semibold text-white">
-                  {selectedDay ? `${selectedDay.fullLabel} 시간대별 예보` : '시간대별 예보'}
-                </div>
-                <div className="mt-1 text-[11px] text-gray-400">
-                  오늘은 현재 시각 이후 시간대부터 보여주고, 다른 날짜는 하루 전체 시간대를 보여줍니다.
-                </div>
-              </div>
-
               <div className="scrollbar-hide mb-4 overflow-x-auto pb-2">
                 <div className="relative" style={{ height: `${chart.height}px`, width: `${chart.width}px` }}>
                   <svg
@@ -293,7 +310,7 @@ export function GoogleWeatherPopup({
                           fontWeight="bold"
                           textAnchor="middle"
                         >
-                          {point.temperature}
+                          {formatHourlyTemperature(point.temperature)}
                         </text>
                         <text
                           x={point.x}
@@ -314,13 +331,13 @@ export function GoogleWeatherPopup({
                 {selectedHourly.map((hour) => (
                   <div
                     key={`${hour.dateKey}-${hour.timeLabel}`}
-                    className="min-w-[112px] rounded-2xl bg-white/5 px-3 py-3"
+                    className="min-w-[138px] rounded-2xl bg-white/5 px-3 py-3"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="text-[11px] font-medium text-gray-400">{hour.timeLabel}</div>
                         <div className="mt-1 text-lg font-semibold text-white">
-                          {hour.temperature}°
+                          {formatHourlyTemperature(hour.temperature)}°
                         </div>
                       </div>
                       {hour.iconUrl ? (
@@ -342,6 +359,33 @@ export function GoogleWeatherPopup({
                       <div className="flex items-center gap-1">
                         <Wind size={12} className="text-gray-300" />
                         <span>바람 {hour.windSpeed}km/h</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Sparkles size={12} className="text-stone-300" />
+                        <span>
+                          미세{' '}
+                          <span className={getEnvironmentGradeClass(hour.pm10Grade)}>
+                            {formatHourlyEnvironmentValue(hour.pm10Grade)}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <CloudSun size={12} className="text-rose-200" />
+                        <span>
+                          초미세{' '}
+                          <span className={getEnvironmentGradeClass(hour.pm25Grade)}>
+                            {formatHourlyEnvironmentValue(hour.pm25Grade)}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Sun size={12} className="text-yellow-200" />
+                        <span>
+                          자외선{' '}
+                          <span className={getEnvironmentGradeClass(hour.uvGrade)}>
+                            {formatHourlyEnvironmentValue(hour.uvGrade)}
+                          </span>
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -381,9 +425,16 @@ export function GoogleWeatherPopup({
                   <div className="mb-2 text-[10px] text-gray-400">N/A</div>
                 )}
                 <span className="text-xs font-bold text-white">
-                  {day.maxTemperature}°{' '}
-                  <span className="font-normal text-gray-400">{day.minTemperature}°</span>
+                  {formatHourlyTemperature(day.maxTemperature)}°{' '}
+                  <span className="font-normal text-gray-400">
+                    {formatHourlyTemperature(day.minTemperature)}°
+                  </span>
                 </span>
+                {day.sunsetTime ? (
+                  <span className="mt-1 block text-[10px] text-gray-400">
+                    일몰 {formatSunTime(day.sunsetTime)}
+                  </span>
+                ) : null}
               </button>
             ))}
 

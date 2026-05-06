@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, type MouseEvent, useEffect, useMemo, useState } from 'react';
 import {
   Bell,
   Calendar as CalendarIcon,
@@ -33,9 +33,11 @@ import {
   DEFAULT_LOCATION,
   fetchWeatherSnapshot,
   formatCurrentDateTime,
+  formatEnvironmentMetric,
+  formatSunTime,
+  formatTemperature,
   formatWindSpeed,
   getPrecipitationPercent,
-  roundTemperature,
   type WeatherLocation,
   type WeatherSnapshot,
 } from './lib/weather';
@@ -64,6 +66,20 @@ interface BucketItem {
   id: number;
   status: BucketStatus;
   text: string;
+}
+
+interface BucketTitlePopover {
+  item: BucketItem;
+  left: number;
+  placement: 'bottom' | 'top';
+  top: number;
+  width: number;
+}
+
+interface ClothingAdvice {
+  day: string;
+  extra?: string;
+  night: string;
 }
 
 interface MannerReview {
@@ -650,7 +666,57 @@ function formatLoveMilestoneDate(date: Date) {
   )}.${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function isStoredWeatherLocation(value: unknown): value is WeatherLocation {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const location = value as WeatherLocation;
+
+  return (
+    typeof location.label === 'string' &&
+    typeof location.latitude === 'number' &&
+    Number.isFinite(location.latitude) &&
+    typeof location.longitude === 'number' &&
+    Number.isFinite(location.longitude) &&
+    (location.source === 'gps' || location.source === 'fallback')
+  );
+}
+
+function isOutdatedFallbackLocation(location: WeatherLocation) {
+  return (
+    location.source === 'fallback' &&
+    (location.label !== DEFAULT_LOCATION.label ||
+      Math.abs(location.latitude - DEFAULT_LOCATION.latitude) >= 0.001 ||
+      Math.abs(location.longitude - DEFAULT_LOCATION.longitude) >= 0.001)
+  );
+}
+
 function loadLocation() {
+  if (typeof window !== 'undefined') {
+    try {
+      const storedLocation = JSON.parse(
+        window.localStorage.getItem(LOCATION_STORAGE_KEY) ?? 'null',
+      );
+
+      if (isStoredWeatherLocation(storedLocation)) {
+        if (isOutdatedFallbackLocation(storedLocation)) {
+          return {
+            ...DEFAULT_LOCATION,
+            updatedAt: Date.now(),
+          };
+        }
+
+        return {
+          ...storedLocation,
+          updatedAt: Date.now(),
+        };
+      }
+    } catch {
+      // Invalid persisted location should not block the weather widget.
+    }
+  }
+
   return {
     ...DEFAULT_LOCATION,
     updatedAt: Date.now(),
@@ -671,6 +737,111 @@ function formatClockFromTimestamp(timestamp: number) {
     minute: '2-digit',
     hour12: true,
   }).format(new Date(timestamp));
+}
+
+function parseWeatherHourLabel(timeLabel: string) {
+  const match = timeLabel.match(/(오전|오후)\s+(\d+)시/);
+
+  if (!match) {
+    return null;
+  }
+
+  const hour = Number(match[2]);
+  if (Number.isNaN(hour)) {
+    return null;
+  }
+
+  if (match[1] === '오전') {
+    return hour === 12 ? 0 : hour;
+  }
+
+  return hour === 12 ? 12 : hour + 12;
+}
+
+function getWeatherDateKey(timestamp?: string, timeZoneId = 'Asia/Seoul') {
+  if (!timestamp) {
+    return formatYMD(new Date());
+  }
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    day: '2-digit',
+    month: '2-digit',
+    timeZone: timeZoneId,
+    year: 'numeric',
+  }).formatToParts(new Date(timestamp));
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+
+  return year && month && day ? `${year}-${month}-${day}` : formatYMD(new Date());
+}
+
+function getOutfitLabel(temperature?: number) {
+  if (temperature == null) {
+    return '확인 중';
+  }
+
+  if (temperature >= 28) {
+    return '민소매';
+  }
+  if (temperature >= 23) {
+    return '반팔';
+  }
+  if (temperature >= 20) {
+    return '긴팔';
+  }
+  if (temperature >= 16) {
+    return '셔츠';
+  }
+  if (temperature >= 12) {
+    return '외투';
+  }
+  if (temperature >= 6) {
+    return '코트';
+  }
+
+  return '패딩';
+}
+
+function buildClothingAdvice(weatherData: WeatherSnapshot | null): ClothingAdvice {
+  if (weatherData?.current.temperature?.degrees == null) {
+    return {
+      day: '확인 중',
+      night: '확인 중',
+    };
+  }
+
+  const currentTemperature = weatherData.current.temperature.degrees;
+  const currentDateKey = getWeatherDateKey(weatherData.current.currentTime, weatherData.timeZoneId);
+  const todayHourly = weatherData.hourly.filter((hour) => hour.dateKey === currentDateKey);
+  const daytimeTemperatures = todayHourly
+    .filter((hour) => {
+      const hourValue = parseWeatherHourLabel(hour.timeLabel);
+      return hourValue != null && hourValue >= 10 && hourValue <= 17;
+    })
+    .map((hour) => hour.temperature);
+  const eveningTemperatures = todayHourly
+    .filter((hour) => {
+      const hourValue = parseWeatherHourLabel(hour.timeLabel);
+      return hourValue != null && hourValue >= 18;
+    })
+    .map((hour) => hour.temperature);
+  const todayDaily = weatherData.daily.find((day) => day.dateKey === currentDateKey);
+  const daytimeHigh =
+    daytimeTemperatures.length > 0
+      ? Math.max(...daytimeTemperatures)
+      : todayDaily?.maxTemperature ?? currentTemperature;
+  const eveningLow =
+    eveningTemperatures.length > 0
+      ? Math.min(...eveningTemperatures)
+      : todayDaily?.minTemperature ?? currentTemperature;
+  const rainChance = getPrecipitationPercent(weatherData.current.precipitation);
+
+  return {
+    day: getOutfitLabel(daytimeHigh),
+    extra: rainChance >= 40 ? '☔ 우산' : undefined,
+    night: getOutfitLabel(eveningLow),
+  };
 }
 
 function buildSessionFromEmail(email?: string | null): Session | null {
@@ -710,6 +881,7 @@ export default function App() {
   const [isWeatherPopupOpen, setIsWeatherPopupOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const [editingBucketItemId, setEditingBucketItemId] = useState<number | null>(null);
+  const [viewingBucketItem, setViewingBucketItem] = useState<BucketTitlePopover | null>(null);
   const [loginForm, setLoginForm] = useState({
     username: DEFAULT_ACCOUNTS[0].username,
     password: '',
@@ -793,6 +965,7 @@ export default function App() {
       setMannerReviewError(null);
       setEvents([]);
       setBucketList([]);
+      setViewingBucketItem(null);
       setMannerReviews([]);
       setDataError(null);
       return;
@@ -809,12 +982,7 @@ export default function App() {
       return;
     }
 
-    setLocation({
-      ...DEFAULT_LOCATION,
-      updatedAt: Date.now(),
-    });
-    setLocationError(null);
-    setIsRefreshingLocation(false);
+    void refreshCurrentLocation({ silentFallback: true });
   }, [session]);
 
   useEffect(() => {
@@ -978,9 +1146,12 @@ export default function App() {
   );
 
   const weatherSummary = useMemo(() => {
-    const baseLocationText = '서울 고정 날씨';
+    const baseLocationText =
+      weatherData?.providerLabel ??
+      (location.source === 'gps' ? '위치기반 날씨' : `${DEFAULT_LOCATION.label} 기준 날씨`);
 
     return {
+      clothingAdvice: buildClothingAdvice(weatherData),
       condition: weatherData?.current.weatherCondition?.description?.text ?? '날씨 정보 준비 중',
       humidity:
         weatherData?.current.relativeHumidity == null
@@ -988,16 +1159,20 @@ export default function App() {
           : `${weatherData.current.relativeHumidity}%`,
       locationHelperText: `${baseLocationText} · ${formatClockFromTimestamp(location.updatedAt)}`,
       locationLabel: location.label,
+      pm10: formatEnvironmentMetric(weatherData?.current.environment?.pm10),
+      pm25: formatEnvironmentMetric(weatherData?.current.environment?.pm25),
       rainChance: weatherData
         ? `${getPrecipitationPercent(weatherData.current.precipitation)}%`
         : '-',
+      sunset: formatSunTime(weatherData?.current.environment?.sunsetTime),
       temperatureText: weatherData
-        ? String(roundTemperature(weatherData.current.temperature))
+        ? formatTemperature(weatherData.current.temperature)
         : '--',
       updatedText:
         weatherData?.current.currentTime != null
           ? formatCurrentDateTime(weatherData.current.currentTime, weatherData.timeZoneId)
           : `위치 갱신 ${formatClockFromTimestamp(location.updatedAt)}`,
+      uvIndex: formatEnvironmentMetric(weatherData?.current.environment?.uvIndex),
       wind: weatherData ? formatWindSpeed(weatherData.current.wind) : '-',
     };
   }, [location, weatherData]);
@@ -1212,13 +1387,57 @@ export default function App() {
     setIsDataLoading(false);
   }
 
-  function refreshCurrentLocation() {
+  function refreshCurrentLocation(options: { silentFallback?: boolean } = {}) {
     setIsRefreshingLocation(true);
     setLocationError(null);
-    setLocation({
+
+    const fallbackLocation: WeatherLocation = {
       ...DEFAULT_LOCATION,
       updatedAt: Date.now(),
-    });
+    };
+
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocation(fallbackLocation);
+      setIsRefreshingLocation(false);
+
+      if (!options.silentFallback) {
+        setLocationError(
+          `현재 브라우저에서 위치 기반 날씨를 사용할 수 없어 ${DEFAULT_LOCATION.label} 기준으로 보여드려요.`,
+        );
+      }
+
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        const latitude = Number(coords.latitude.toFixed(6));
+        const longitude = Number(coords.longitude.toFixed(6));
+
+        setLocation({
+          label: '현재 위치',
+          latitude,
+          longitude,
+          source: 'gps',
+          coordsLabel: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+          updatedAt: Date.now(),
+        });
+      },
+      () => {
+        setLocation(fallbackLocation);
+
+        if (!options.silentFallback) {
+          setLocationError(
+            `위치 권한을 확인하지 못해 ${DEFAULT_LOCATION.label} 기준 날씨로 보여드려요.`,
+          );
+        }
+      },
+      {
+        enableHighAccuracy: false,
+        maximumAge: 10 * 60 * 1000,
+        timeout: 8000,
+      },
+    );
   }
 
   function openAddModal() {
@@ -1250,6 +1469,27 @@ export default function App() {
       status: item.status,
     });
     setIsBucketModalOpen(true);
+  }
+
+  function openBucketTitleModal(item: BucketItem, event: MouseEvent<HTMLButtonElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const viewportWidth = typeof window === 'undefined' ? 390 : window.innerWidth;
+    const viewportHeight = typeof window === 'undefined' ? 844 : window.innerHeight;
+    const width = Math.min(Math.max(rect.width + 96, 220), Math.min(320, viewportWidth - 32));
+    const left = Math.min(Math.max(rect.left - 8, 16), viewportWidth - width - 16);
+    const hasBottomSpace = rect.bottom + 180 < viewportHeight;
+
+    setViewingBucketItem({
+      item,
+      left,
+      placement: hasBottomSpace ? 'bottom' : 'top',
+      top: hasBottomSpace ? rect.bottom + 8 : rect.top - 8,
+      width,
+    });
+  }
+
+  function closeBucketTitleModal() {
+    setViewingBucketItem(null);
   }
 
   function closeBucketModal() {
@@ -2342,6 +2582,7 @@ export default function App() {
             {activeTab === 'calendar' ? (
               <>
                 <WeatherWidget
+                  clothingAdvice={weatherSummary.clothingAdvice}
                   condition={weatherSummary.condition}
                   errorMessage={weatherError ?? locationError}
                   humidity={weatherSummary.humidity}
@@ -2349,9 +2590,13 @@ export default function App() {
                   isRefreshingLocation={isRefreshingLocation}
                   locationHelperText={weatherSummary.locationHelperText}
                   locationLabel={weatherSummary.locationLabel}
+                  pm10={weatherSummary.pm10}
+                  pm25={weatherSummary.pm25}
                   rainChance={weatherSummary.rainChance}
+                  sunset={weatherSummary.sunset}
                   temperatureText={weatherSummary.temperatureText}
                   updatedText={weatherSummary.updatedText}
+                  uvIndex={weatherSummary.uvIndex}
                   wind={weatherSummary.wind}
                   onOpen={() => setIsWeatherPopupOpen(true)}
                   onRefreshLocation={refreshCurrentLocation}
@@ -2641,15 +2886,18 @@ export default function App() {
                             {item.status === 'completed' ? <Check size={14} strokeWidth={3} /> : null}
                             {item.status === 'ready' ? <Clock size={14} strokeWidth={3} /> : null}
                           </button>
-                          <span
-                            className={`font-medium ${
+                          <button
+                            type="button"
+                            onClick={(event) => openBucketTitleModal(item, event)}
+                            className={`min-w-0 truncate text-left font-medium ${
                               item.status === 'completed'
                                 ? 'text-gray-400 line-through'
                                 : 'text-gray-700'
-                            } truncate`}
+                            }`}
+                            title="제목 전체 보기"
                           >
                             {item.text}
-                          </span>
+                          </button>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
                           <span
@@ -2736,7 +2984,6 @@ export default function App() {
           </div>
 
           <GoogleWeatherPopup
-            coordsLabel={location.coordsLabel}
             errorMessage={weatherError}
             isLoading={isWeatherLoading}
             isOpen={isWeatherPopupOpen}
@@ -2744,6 +2991,53 @@ export default function App() {
             onClose={() => setIsWeatherPopupOpen(false)}
             weatherData={weatherData}
           />
+
+          {viewingBucketItem ? (
+            <div
+              className="fixed inset-0 z-40 bg-black/5"
+              onClick={closeBucketTitleModal}
+            >
+              <div
+                className={`absolute rounded-[22px] bg-white p-4 shadow-[0_18px_44px_rgba(47,36,23,0.18)] ${
+                  viewingBucketItem.placement === 'top' ? '-translate-y-full' : ''
+                }`}
+                style={{
+                  left: viewingBucketItem.left,
+                  top: viewingBucketItem.top,
+                  width: viewingBucketItem.width,
+                }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <span
+                  className={`absolute left-8 h-3 w-3 rotate-45 bg-white ${
+                    viewingBucketItem.placement === 'top' ? '-bottom-1.5' : '-top-1.5'
+                  }`}
+                />
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <span
+                    className="rounded-full px-3 py-1 text-[11px] font-bold"
+                    style={{
+                      backgroundColor: BUCKET_STATUS_TONES[viewingBucketItem.item.status].bg,
+                      color: BUCKET_STATUS_TONES[viewingBucketItem.item.status].text,
+                    }}
+                  >
+                    {BUCKET_STATUS_TONES[viewingBucketItem.item.status].label}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={closeBucketTitleModal}
+                    className="rounded-full bg-[#F8F5EF] p-1.5 text-[#9A8F82]"
+                    aria-label="버킷 제목 닫기"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <p className="whitespace-pre-wrap break-words text-sm font-bold leading-6 text-[#2f2417]">
+                  {viewingBucketItem.item.text}
+                </p>
+              </div>
+            </div>
+          ) : null}
 
           {isAddModalOpen ? (
             <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/20 backdrop-blur-sm">

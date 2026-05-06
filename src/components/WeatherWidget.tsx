@@ -1,6 +1,11 @@
-import { CloudSun, Droplets, MapPin, RefreshCw, Wind } from 'lucide-react';
+import { CloudSun, Droplets, MapPin, RefreshCw, Sparkles, Sun, Sunset, Wind } from 'lucide-react';
 
 interface WeatherWidgetProps {
+  clothingAdvice: {
+    day: string;
+    extra?: string;
+    night: string;
+  };
   condition: string;
   errorMessage: string | null;
   humidity: string;
@@ -8,15 +13,52 @@ interface WeatherWidgetProps {
   isRefreshingLocation: boolean;
   locationHelperText: string;
   locationLabel: string;
+  pm10: string;
+  pm25: string;
   rainChance: string;
+  sunset: string;
   temperatureText: string;
   updatedText: string;
+  uvIndex: string;
   wind: string;
   onOpen: () => void;
   onRefreshLocation: () => void;
 }
 
+function getEnvironmentGradeClass(grade: string) {
+  if (grade === '매우좋음') {
+    return 'text-[#7DA8D8]';
+  }
+  if (grade === '좋음') {
+    return 'text-[#91B89D]';
+  }
+  if (grade === '낮음') {
+    return 'text-[#7DA8D8]';
+  }
+  if (grade === '보통') {
+    return 'text-[#C8A35D]';
+  }
+  if (grade === '높음') {
+    return 'text-[#D48787]';
+  }
+  if (grade === '매우높음') {
+    return 'text-[#C96F6F]';
+  }
+  if (grade === '위험') {
+    return 'text-[#B75D5D]';
+  }
+  if (grade === '나쁨') {
+    return 'text-[#D48787]';
+  }
+  if (grade === '매우나쁨') {
+    return 'text-[#C96F6F]';
+  }
+
+  return 'text-[#9A8F82]';
+}
+
 export function WeatherWidget({
+  clothingAdvice,
   condition,
   errorMessage,
   humidity,
@@ -24,9 +66,13 @@ export function WeatherWidget({
   isRefreshingLocation,
   locationHelperText,
   locationLabel,
+  pm10,
+  pm25,
   rainChance,
+  sunset,
   temperatureText,
   updatedText,
+  uvIndex,
   wind,
   onOpen,
   onRefreshLocation,
@@ -64,16 +110,16 @@ export function WeatherWidget({
               event.stopPropagation();
               onRefreshLocation();
             }}
-            title="서울 기준 날씨 다시 불러오기"
+            title="현재 위치 날씨 다시 불러오기"
             className="group relative rounded-full bg-[#F8F5EF] p-2 text-[#9d7b52] transition hover:bg-white"
-            aria-label="서울 기준 날씨 다시 불러오기"
+            aria-label="현재 위치 날씨 다시 불러오기"
           >
             <RefreshCw
               size={17}
               className={isRefreshingLocation ? 'animate-spin' : undefined}
             />
             <span className="pointer-events-none absolute right-0 top-full z-10 mt-2 hidden w-44 rounded-xl bg-[#2f2417] px-3 py-2 text-left text-[11px] font-medium leading-4 text-white shadow-lg group-hover:block">
-              서울 기준 날씨를 다시 불러옵니다.
+              현재 위치 기준 날씨를 다시 불러옵니다.
             </span>
           </button>
         </div>
@@ -91,6 +137,36 @@ export function WeatherWidget({
             <Wind size={11} className="text-[#A594F9]" />
             바람 {wind}
           </span>
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#F8F5EF] px-2 py-1">
+            <Sparkles size={11} className="text-[#9A8F82]" />
+            미세 <span className={getEnvironmentGradeClass(pm10)}>{pm10}</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#F8F5EF] px-2 py-1">
+            <Sparkles size={11} className="text-[#B89E8A]" />
+            초미세 <span className={getEnvironmentGradeClass(pm25)}>{pm25}</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#F8F5EF] px-2 py-1">
+            <Sun size={11} className="text-[#D8AA54]" />
+            자외선 <span className={getEnvironmentGradeClass(uvIndex)}>{uvIndex}</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#F8F5EF] px-2 py-1">
+            <Sunset size={11} className="text-[#D48787]" />
+            일몰 {sunset}
+          </span>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2 overflow-x-auto text-[11px] font-bold">
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#FFF7E8] px-3 py-1.5 text-[#6c5840]">
+            🌞 {clothingAdvice.day}
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#EEF4FB] px-3 py-1.5 text-[#5F7894]">
+            🌜 {clothingAdvice.night}
+          </span>
+          {clothingAdvice.extra ? (
+            <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#F0EDFF] px-3 py-1.5 text-[#7D6DE0]">
+              {clothingAdvice.extra}
+            </span>
+          ) : null}
         </div>
 
         <div className="mt-2 flex items-center justify-between gap-3 text-[10px] text-[#8d7558]">
