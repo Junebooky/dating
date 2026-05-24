@@ -645,7 +645,7 @@ function getLoveDayCount(today = new Date()) {
   const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const diffTime = todayDate.getTime() - startDate.getTime();
 
-  return Math.max(0, Math.floor(diffTime / 86_400_000));
+  return Math.max(0, Math.floor(diffTime / 86_400_000) + 1);
 }
 
 function getLoveProgressPercent(dayCount: number) {
@@ -1956,7 +1956,6 @@ export default function App() {
     const profileReviews = mannerReviews
       .filter((review) => review.targetProfile === profile)
       .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-    const recentReviews = profileReviews.slice(0, 3);
     const temperature = calculateMannerTemperature(profile, mannerReviews);
     const temperatureColor = temperature < MANNER_BASE_TEMPERATURE ? '#918679' : profileTone.bg;
     const temperatureOpacity = temperature >= MANNER_BASE_TEMPERATURE + 1 ? 0.82 : 0.68;
@@ -2025,12 +2024,14 @@ export default function App() {
         <div className="mt-5">
           <div className="mb-1 flex items-center justify-between">
             <h4 className="text-sm font-bold text-[#2f2417]">칭찬해요</h4>
-            <span className="text-[10px] font-bold text-gray-400">최근 3개</span>
+            <span className="text-[10px] font-bold text-gray-400">
+              전체 {profileReviews.length}개
+            </span>
           </div>
 
-          {recentReviews.length > 0 ? (
-            <div>
-              {recentReviews.map((review) => {
+          {profileReviews.length > 0 ? (
+            <div className="scrollbar-hide max-h-[340px] overflow-y-auto pr-1">
+              {profileReviews.map((review) => {
                 const authorMeta = PROFILE_META[review.authorProfile];
                 const canManageReview = currentAccount?.profile === review.authorProfile;
                 const reviewDelta = getMannerReviewTemperatureDelta();
