@@ -78,10 +78,11 @@ export function WeatherWidget({
   onRefreshLocation,
 }: WeatherWidgetProps) {
   return (
-    <div className="border-b border-[#f1e6d8] bg-[#fffaf4] px-4 py-3">
+    <div className="bg-[#fffaf4] px-4 py-3">
+      <div className="stacked-card stacked-card--sand rounded-[24px]">
       <div
         onClick={onOpen}
-        className="cursor-pointer rounded-[22px] bg-white/80 p-3 shadow-[0_10px_28px_rgba(72,45,18,0.06)] transition hover:bg-white"
+        className="stacked-card__body cursor-pointer p-3 transition hover:bg-white"
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -179,6 +180,7 @@ export function WeatherWidget({
             {errorMessage}
           </div>
         ) : null}
+      </div>
       </div>
     </div>
   );

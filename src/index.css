@@ -12,6 +12,55 @@
   }
 }
 
+@layer components {
+  .stacked-card {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .stacked-card::before {
+    position: absolute;
+    right: -4px;
+    bottom: -5px;
+    left: 5px;
+    top: 5px;
+    z-index: 0;
+    border: 1.5px solid rgba(47, 36, 23, 0.72);
+    border-radius: inherit;
+    background: var(--stacked-accent, #fbefef);
+    content: '';
+  }
+
+  .stacked-card__body {
+    position: relative;
+    z-index: 1;
+    border: 1.5px solid rgba(47, 36, 23, 0.72);
+    border-radius: inherit;
+    background: var(--stacked-bg, #fffdf9);
+    box-shadow: 0 12px 28px rgba(47, 36, 23, 0.08);
+  }
+
+  .stacked-card--pink {
+    --stacked-accent: #fbe6e6;
+    --stacked-bg: #fffdf9;
+  }
+
+  .stacked-card--blue {
+    --stacked-accent: #e4eef8;
+    --stacked-bg: #fffdf9;
+  }
+
+  .stacked-card--lavender {
+    --stacked-accent: #eee9ff;
+    --stacked-bg: #fffdf9;
+  }
+
+  .stacked-card--sand {
+    --stacked-accent: #f2e8d9;
+    --stacked-bg: #fffdf9;
+  }
+}
+
 body {
   margin: 0;
   padding: 0;

@@ -1,13 +1,15 @@
-import { type FormEvent, type MouseEvent, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, type FormEvent, type MouseEvent, useEffect, useMemo, useState } from 'react';
 import {
   Bell,
   Calendar as CalendarIcon,
+  Camera,
   Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock,
   Heart,
+  Image as ImageIcon,
   LockKeyhole,
   LogOut,
   Pencil,
@@ -15,6 +17,7 @@ import {
   Settings,
   Thermometer,
   Trash2,
+  Upload,
   UserRound,
   X,
 } from 'lucide-react';
@@ -60,6 +63,17 @@ interface CalendarEvent {
   participantProfiles?: AccountProfile[];
   time: string;
   title: string;
+}
+
+interface CalendarPhoto {
+  createdAt: string;
+  date: string;
+  id: number;
+  isCover: boolean;
+  publicUrl: string;
+  storagePath: string;
+  uploadedByProfile?: AccountProfile;
+  uploadedByUsername?: string;
 }
 
 interface BucketItem {
@@ -120,6 +134,17 @@ interface CalendarEventRow {
   title?: string | null;
 }
 
+interface CalendarPhotoRow {
+  created_at?: string | null;
+  date?: string | null;
+  id?: number | null;
+  is_cover?: boolean | null;
+  public_url?: string | null;
+  storage_path?: string | null;
+  uploaded_by_profile?: string | null;
+  uploaded_by_username?: string | null;
+}
+
 interface BucketItemRow {
   id?: number | null;
   status?: string | null;
@@ -167,6 +192,7 @@ const MANNER_MAX_TEMPERATURE = 45;
 const LOVE_START_DATE = new Date(2026, 1, 14);
 const LOVE_GOAL_DAYS = 1000;
 const LOVE_MILESTONE_DAYS = Array.from({ length: 10 }, (_, index) => (index + 1) * 100);
+const CALENDAR_PHOTO_BUCKET = 'calendar-photos';
 const CALENDAR_CELL_TITLE_MAX_LENGTH = 18;
 const EVENT_MEMO_META_PREFIX = '__dear_days_event_meta__';
 
@@ -529,6 +555,73 @@ function toCalendarEventRow(event: CalendarEvent, includeEndDate = true) {
   return row;
 }
 
+function normalizeCalendarPhotoRow(row: CalendarPhotoRow, index: number): CalendarPhoto | null {
+  if (
+    typeof row.date !== 'string' ||
+    typeof row.storage_path !== 'string' ||
+    typeof row.public_url !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    id: typeof row.id === 'number' ? row.id : index + 1,
+    date: row.date,
+    storagePath: row.storage_path,
+    publicUrl: row.public_url,
+    isCover: row.is_cover === true,
+    uploadedByUsername:
+      typeof row.uploaded_by_username === 'string' ? row.uploaded_by_username : undefined,
+    uploadedByProfile: isAccountProfile(row.uploaded_by_profile)
+      ? row.uploaded_by_profile
+      : undefined,
+    createdAt: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
+  };
+}
+
+function toCalendarPhotoRow(photo: CalendarPhoto) {
+  return {
+    id: photo.id,
+    date: photo.date,
+    storage_path: photo.storagePath,
+    public_url: photo.publicUrl,
+    is_cover: photo.isCover,
+    uploaded_by_username: photo.uploadedByUsername ?? null,
+    uploaded_by_profile: photo.uploadedByProfile ?? null,
+    created_at: photo.createdAt,
+  };
+}
+
+function sortCalendarPhotos(photos: CalendarPhoto[]) {
+  return [...photos].sort(
+    (left, right) =>
+      Number(right.isCover) - Number(left.isCover) ||
+      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+  );
+}
+
+function getPhotoExtension(file: File) {
+  const extension = file.name.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  if (extension) {
+    return extension;
+  }
+
+  if (file.type === 'image/png') {
+    return 'png';
+  }
+
+  if (file.type === 'image/webp') {
+    return 'webp';
+  }
+
+  if (file.type === 'image/gif') {
+    return 'gif';
+  }
+
+  return 'jpg';
+}
+
 function normalizeBucketItemRow(row: BucketItemRow, index: number): BucketItem {
   return {
     id: typeof row.id === 'number' ? row.id : index + 1,
@@ -861,6 +954,7 @@ export default function App() {
   const accounts = DEFAULT_ACCOUNTS;
   const [session, setSession] = useState<Session | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [calendarPhotos, setCalendarPhotos] = useState<CalendarPhoto[]>([]);
   const [bucketList, setBucketList] = useState<BucketItem[]>([]);
   const [mannerReviews, setMannerReviews] = useState<MannerReview[]>([]);
   const [location, setLocation] = useState<WeatherLocation>(() => loadLocation());
@@ -868,6 +962,7 @@ export default function App() {
   const [bucketFilter, setBucketFilter] = useState<BucketFilter>('all');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [isCalendarPhotosVisible, setIsCalendarPhotosVisible] = useState(true);
   const [newEvent, setNewEvent] = useState<EventDraft>(EMPTY_EVENT_DRAFT);
   const [bucketDraft, setBucketDraft] = useState<BucketDraft>(EMPTY_BUCKET_DRAFT);
   const [mannerReviewDraft, setMannerReviewDraft] = useState<MannerReviewDraft>(
@@ -877,6 +972,8 @@ export default function App() {
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isBucketModalOpen, setIsBucketModalOpen] = useState(false);
   const [isMannerModalOpen, setIsMannerModalOpen] = useState(false);
+  const [photoModalDate, setPhotoModalDate] = useState<string | null>(null);
+  const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [editingMannerReviewId, setEditingMannerReviewId] = useState<number | null>(null);
   const [isWeatherPopupOpen, setIsWeatherPopupOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
@@ -891,6 +988,7 @@ export default function App() {
   const [dataError, setDataError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [mannerReviewError, setMannerReviewError] = useState<string | null>(null);
+  const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
   const [weatherData, setWeatherData] = useState<WeatherSnapshot | null>(null);
@@ -954,6 +1052,9 @@ export default function App() {
     if (!session) {
       setIsWeatherPopupOpen(false);
       setIsAccountModalOpen(false);
+      setPhotoModalDate(null);
+      setPhotoUploadError(null);
+      setIsPhotoUploading(false);
       setWeatherData(null);
       setWeatherError(null);
       setLocationError(null);
@@ -964,6 +1065,7 @@ export default function App() {
       setEditingMannerReviewId(null);
       setMannerReviewError(null);
       setEvents([]);
+      setCalendarPhotos([]);
       setBucketList([]);
       setViewingBucketItem(null);
       setMannerReviews([]);
@@ -1025,6 +1127,27 @@ export default function App() {
       .filter((event) => isDateInEventRange(event, selectedDateKey))
       .sort((left, right) => left.time.localeCompare(right.time));
   }, [events, selectedDate]);
+
+  const photosByDate = useMemo(() => {
+    const nextPhotosByDate = new Map<string, CalendarPhoto[]>();
+
+    calendarPhotos.forEach((photo) => {
+      const datePhotos = nextPhotosByDate.get(photo.date) ?? [];
+      datePhotos.push(photo);
+      nextPhotosByDate.set(photo.date, datePhotos);
+    });
+
+    nextPhotosByDate.forEach((datePhotos, dateKey) => {
+      nextPhotosByDate.set(dateKey, sortCalendarPhotos(datePhotos));
+    });
+
+    return nextPhotosByDate;
+  }, [calendarPhotos]);
+
+  const photoModalPhotos = useMemo(
+    () => (photoModalDate ? photosByDate.get(photoModalDate) ?? [] : []),
+    [photoModalDate, photosByDate],
+  );
 
   const monthEvents = useMemo(() => {
     const monthStart = formatYMD(
@@ -1332,13 +1455,15 @@ export default function App() {
     setIsDataLoading(true);
     setDataError(null);
 
-    const [eventsResult, bucketResult, mannerResult] = await Promise.all([
+    const [eventsResult, bucketResult, mannerResult, photoResult] = await Promise.all([
       client.from('calendar_events').select('*').order('date').order('time'),
       client.from('bucket_items').select('*').order('id'),
       client.from('manner_reviews').select('*').order('created_at', { ascending: false }),
+      client.from('calendar_photos').select('*').order('created_at', { ascending: false }),
     ]);
 
-    const firstError = eventsResult.error ?? bucketResult.error ?? mannerResult.error;
+    const firstError =
+      eventsResult.error ?? bucketResult.error ?? mannerResult.error ?? photoResult.error;
 
     if (firstError) {
       setDataError(getRemoteErrorMessage(firstError));
@@ -1378,6 +1503,11 @@ export default function App() {
     }
 
     setEvents(nextEvents);
+    setCalendarPhotos(
+      ((photoResult.data ?? []) as CalendarPhotoRow[])
+        .map(normalizeCalendarPhotoRow)
+        .filter((photo): photo is CalendarPhoto => Boolean(photo)),
+    );
     setBucketList(nextBucketList);
     setMannerReviews(
       ((mannerResult.data ?? []) as MannerReviewRow[])
@@ -1490,6 +1620,214 @@ export default function App() {
 
   function closeBucketTitleModal() {
     setViewingBucketItem(null);
+  }
+
+  function openCalendarPhotoModal(dateKey: string) {
+    setSelectedDate(new Date(`${dateKey}T00:00:00`));
+    setPhotoModalDate(dateKey);
+    setPhotoUploadError(null);
+  }
+
+  function closeCalendarPhotoModal() {
+    setPhotoModalDate(null);
+    setPhotoUploadError(null);
+    setIsPhotoUploading(false);
+  }
+
+  async function uploadCalendarPhotos(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const files = Array.from(input.files ?? []);
+
+    if (!photoModalDate || files.length === 0) {
+      return;
+    }
+
+    const imageFiles = files.filter(
+      (file) =>
+        file.type.startsWith('image/') || /\.(gif|heic|heif|jpe?g|png|webp)$/i.test(file.name),
+    );
+
+    if (imageFiles.length === 0) {
+      setPhotoUploadError('이미지 파일만 업로드할 수 있습니다.');
+      input.value = '';
+      return;
+    }
+
+    const client = getRemoteClient();
+    if (!client) {
+      return;
+    }
+
+    setIsPhotoUploading(true);
+    setPhotoUploadError(null);
+
+    try {
+      const existingDatePhotos = calendarPhotos.filter((photo) => photo.date === photoModalDate);
+      const hasCoverPhoto = existingDatePhotos.some((photo) => photo.isCover);
+      const uploadedPhotos: CalendarPhoto[] = [];
+
+      for (const [index, file] of imageFiles.entries()) {
+        const id = Date.now() + index;
+        const storagePath = `${photoModalDate}/${id}.${getPhotoExtension(file)}`;
+        const { error: uploadError } = await client.storage
+          .from(CALENDAR_PHOTO_BUCKET)
+          .upload(storagePath, file, {
+            cacheControl: '31536000',
+            contentType: file.type || undefined,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        const {
+          data: { publicUrl },
+        } = client.storage.from(CALENDAR_PHOTO_BUCKET).getPublicUrl(storagePath);
+        const nextPhoto: CalendarPhoto = {
+          id,
+          date: photoModalDate,
+          storagePath,
+          publicUrl,
+          isCover: !hasCoverPhoto && uploadedPhotos.length === 0,
+          uploadedByUsername: currentAccount?.username ?? session?.username,
+          uploadedByProfile: currentAccount?.profile,
+          createdAt: new Date().toISOString(),
+        };
+        const { error: insertError } = await client
+          .from('calendar_photos')
+          .insert(toCalendarPhotoRow(nextPhoto));
+
+        if (insertError) {
+          throw insertError;
+        }
+
+        uploadedPhotos.push(nextPhoto);
+      }
+
+      setCalendarPhotos((previousPhotos) => sortCalendarPhotos([...uploadedPhotos, ...previousPhotos]));
+      void publishPushNotification({
+        body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 ${formatCalendarDateLabel(
+          photoModalDate,
+        )}에 사진 ${uploadedPhotos.length}장을 추가했어요.`,
+        tag: `calendar-photo-${photoModalDate}`,
+        targetProfiles: getNotificationTargetProfiles(),
+        title: '새 캘린더 사진',
+        type: 'calendar-photo',
+      });
+    } catch (error) {
+      setPhotoUploadError(
+        error instanceof Error ? error.message : '사진 업로드에 실패했습니다.',
+      );
+    } finally {
+      setIsPhotoUploading(false);
+      input.value = '';
+    }
+  }
+
+  async function setCalendarCoverPhoto(photo: CalendarPhoto) {
+    const client = getRemoteClient();
+    if (!client || photo.isCover) {
+      return;
+    }
+
+    setPhotoUploadError(null);
+
+    const { error: clearError } = await client
+      .from('calendar_photos')
+      .update({ is_cover: false })
+      .eq('date', photo.date);
+
+    if (clearError) {
+      setPhotoUploadError(getRemoteErrorMessage(clearError));
+      return;
+    }
+
+    const { error: coverError } = await client
+      .from('calendar_photos')
+      .update({ is_cover: true })
+      .eq('id', photo.id);
+
+    if (coverError) {
+      setPhotoUploadError(getRemoteErrorMessage(coverError));
+      return;
+    }
+
+    setCalendarPhotos((previousPhotos) =>
+      sortCalendarPhotos(
+        previousPhotos.map((previousPhoto) =>
+          previousPhoto.date === photo.date
+            ? { ...previousPhoto, isCover: previousPhoto.id === photo.id }
+            : previousPhoto,
+        ),
+      ),
+    );
+  }
+
+  async function deleteCalendarPhoto(photo: CalendarPhoto) {
+    const client = getRemoteClient();
+    if (!client) {
+      return;
+    }
+
+    setPhotoUploadError(null);
+
+    const remainingDatePhotos = sortCalendarPhotos(
+      calendarPhotos.filter(
+        (datePhoto) => datePhoto.date === photo.date && datePhoto.id !== photo.id,
+      ),
+    );
+    const nextCoverPhoto = photo.isCover ? remainingDatePhotos[0] : undefined;
+    const { error: deleteError } = await client
+      .from('calendar_photos')
+      .delete()
+      .eq('id', photo.id);
+
+    if (deleteError) {
+      setPhotoUploadError(getRemoteErrorMessage(deleteError));
+      return;
+    }
+
+    if (nextCoverPhoto) {
+      const { error: coverError } = await client
+        .from('calendar_photos')
+        .update({ is_cover: true })
+        .eq('id', nextCoverPhoto.id);
+
+      if (coverError) {
+        setPhotoUploadError(getRemoteErrorMessage(coverError));
+        return;
+      }
+    }
+
+    const { error: storageError } = await client.storage
+      .from(CALENDAR_PHOTO_BUCKET)
+      .remove([photo.storagePath]);
+
+    if (storageError) {
+      console.warn('Calendar photo storage delete failed', storageError);
+    }
+
+    setCalendarPhotos((previousPhotos) =>
+      sortCalendarPhotos(
+        previousPhotos
+          .filter((previousPhoto) => previousPhoto.id !== photo.id)
+          .map((previousPhoto) =>
+            nextCoverPhoto && previousPhoto.id === nextCoverPhoto.id
+              ? { ...previousPhoto, isCover: true }
+              : previousPhoto,
+          ),
+      ),
+    );
+    void publishPushNotification({
+      body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 ${formatCalendarDateLabel(
+        photo.date,
+      )} 사진을 정리했어요.`,
+      tag: `calendar-photo-${photo.date}`,
+      targetProfiles: getNotificationTargetProfiles(),
+      title: '캘린더 사진 수정',
+      type: 'calendar-photo',
+    });
   }
 
   function closeBucketModal() {
@@ -1963,8 +2301,11 @@ export default function App() {
     return (
       <section
         key={profile}
-        className="rounded-[28px] bg-[#FDFBF8] p-5 shadow-[0_12px_36px_rgba(66,45,18,0.05)]"
+        className={`stacked-card rounded-[28px] ${
+          profile === 'boyfriend' ? 'stacked-card--blue' : 'stacked-card--pink'
+        }`}
       >
+        <div className="stacked-card__body p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             <div
@@ -2089,6 +2430,7 @@ export default function App() {
               아직 남겨진 칭찬이 없습니다.
             </div>
           )}
+        </div>
         </div>
       </section>
     );
@@ -2260,12 +2602,26 @@ export default function App() {
               Math.min(eventLanes.get(right.id) ?? 99, 3) ||
             left.time.localeCompare(right.time),
         );
+      const datePhotos = photosByDate.get(dateKey) ?? [];
+      const coverPhoto = datePhotos.find((photo) => photo.isCover) ?? datePhotos[0];
+      const visibleLaneCount = isCalendarPhotosVisible ? 3 : 4;
 
       days.push(
-        <button
+        <div
           key={dateKey}
+          role="button"
+          tabIndex={0}
           onClick={() => setSelectedDate(dateObject)}
-          className={`min-h-[124px] px-1.5 py-2 text-left transition ${
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              setSelectedDate(dateObject);
+            }
+          }}
+          aria-label={`${formatCalendarDateLabel(dateKey)} 선택`}
+          className={`flex flex-col px-1.5 py-2 text-left transition ${
+            isCalendarPhotosVisible ? 'min-h-[160px]' : 'min-h-[124px]'
+          } ${
             isSelected
               ? 'bg-[#F4F2FF] shadow-[inset_0_0_0_1px_rgba(165,148,249,0.2)]'
               : 'hover:bg-[#fffaf4]'
@@ -2289,14 +2645,50 @@ export default function App() {
             </span>
           </div>
 
-          <div className="mt-2 grid grid-rows-[repeat(4,28px)] gap-1">
-            {Array.from({ length: 4 }, (_, lane) => {
+          {isCalendarPhotosVisible && isCurrentMonth && coverPhoto ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openCalendarPhotoModal(dateKey);
+              }}
+              className="group relative -mx-1.5 mt-1.5 h-12 overflow-hidden rounded-[9px] bg-[#F8F5EF] shadow-sm transition"
+              aria-label={`${formatCalendarDateLabel(dateKey)} 사진 수정`}
+            >
+              <img
+                src={coverPhoto.publicUrl}
+                alt={`${formatCalendarDateLabel(dateKey)} 대표 사진`}
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+              <span className="absolute inset-0 bg-black/0 transition group-hover:bg-black/10" />
+              {datePhotos.length > 1 ? (
+                <span className="absolute bottom-1 right-1 rounded-full bg-black/45 px-1 py-0.5 text-[7px] font-black leading-none text-white">
+                  {datePhotos.length}
+                </span>
+              ) : null}
+            </button>
+          ) : null}
+
+          <div
+            className={`grid gap-1 ${
+              isCalendarPhotosVisible
+                ? 'mt-1.5 grid-rows-[repeat(3,24px)]'
+                : 'mt-2 grid-rows-[repeat(4,28px)]'
+            }`}
+          >
+            {Array.from({ length: visibleLaneCount }, (_, lane) => {
               const event = dateEvents.find(
-                (item) => Math.min(eventLanes.get(item.id) ?? 0, 3) === lane,
+                (item) => Math.min(eventLanes.get(item.id) ?? 0, visibleLaneCount) === lane,
               );
 
               if (!event) {
-                return <span key={`empty-lane-${dateKey}-${lane}`} className="block h-[28px]" />;
+                return (
+                  <span
+                    key={`empty-lane-${dateKey}-${lane}`}
+                    className={`block ${isCalendarPhotosVisible ? 'h-[24px]' : 'h-[28px]'}`}
+                  />
+                );
               }
 
               const tone = getCalendarEventTone(event);
@@ -2315,7 +2707,9 @@ export default function App() {
               return (
                 <span
                   key={event.id}
-                  className={`relative z-10 flex h-[28px] items-center justify-center overflow-hidden px-0.5 py-1 text-center text-[9.5px] font-black leading-[1.05] shadow-sm ${segmentClass}`}
+                  className={`relative z-10 flex items-center justify-center overflow-hidden px-0.5 py-1 text-center font-black leading-[1.05] shadow-sm ${
+                    isCalendarPhotosVisible ? 'h-[24px] text-[8.5px]' : 'h-[28px] text-[9.5px]'
+                  } ${segmentClass}`}
                   style={{
                     backgroundColor: tone.bg,
                     color: tone.text,
@@ -2345,17 +2739,31 @@ export default function App() {
               );
             })}
           </div>
-            {dateEvents.length > 4 ? (
+            {dateEvents.length > visibleLaneCount ? (
               <span className="mt-1 block truncate rounded-md bg-[#f7f1e8] px-1.5 py-1 text-[9px] font-black leading-none text-[#9d7b52]">
-                +{dateEvents.length - 4}개
+                +{dateEvents.length - visibleLaneCount}개
               </span>
             ) : null}
-        </button>,
+
+          {isCalendarPhotosVisible && isCurrentMonth ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openCalendarPhotoModal(dateKey);
+              }}
+              className="mx-auto mt-auto flex h-4 w-4 items-center justify-center rounded-full bg-[#F4F1EC]/70 text-[#b9ad9f] opacity-55 transition hover:opacity-90"
+              aria-label={`${formatCalendarDateLabel(dateKey)} 사진 추가`}
+            >
+              <Plus size={10} strokeWidth={2.6} />
+            </button>
+          ) : null}
+        </div>,
       );
     }
 
     return days;
-  }, [currentDate, events, selectedDate]);
+  }, [currentDate, events, isCalendarPhotosVisible, photosByDate, selectedDate]);
 
   if (!isAuthReady) {
     return (
@@ -2503,7 +2911,9 @@ export default function App() {
         </div>
 
         {activeTab === 'calendar' ? (
-          <div className="border-b border-[#f1e6d8] bg-[#FDFBF8] px-4 pb-5 pt-4">
+          <div className="bg-[#FDFBF8] px-4 py-4">
+            <div className="stacked-card stacked-card--lavender rounded-[24px]">
+              <div className="stacked-card__body px-4 pb-5 pt-4">
             <div className="mb-3 flex items-end justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#9d7b52]">
@@ -2563,6 +2973,8 @@ export default function App() {
                 </div>
               </div>
             </div>
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -2603,7 +3015,9 @@ export default function App() {
                   onRefreshLocation={refreshCurrentLocation}
                 />
 
-                <section className="border-b border-[#f1e6d8] bg-white px-4 py-4">
+                <section className="bg-white px-4 py-4">
+                  <div className="stacked-card stacked-card--blue rounded-[24px]">
+                    <div className="stacked-card__body p-4">
                   <div className="mb-3 flex items-center justify-between px-1">
                     <div>
                       <h2 className="text-base font-black text-[#2f2417]">다가오는 일정</h2>
@@ -2668,9 +3082,13 @@ export default function App() {
                       예정된 일정이 없습니다.
                     </div>
                   )}
+                    </div>
+                  </div>
                 </section>
 
                 <div className="px-4 pb-10 pt-4">
+                  <div className="stacked-card stacked-card--pink rounded-[26px]">
+                    <div className="stacked-card__body px-3 pb-5 pt-4">
                   <div className="mb-6 flex items-end justify-between px-2">
                     <div>
                       <h2 className="text-2xl font-bold text-[#2f2417]">
@@ -2678,7 +3096,32 @@ export default function App() {
                       </h2>
                       <p className="mt-1 text-sm text-[#8d7558]">이번 달 일정 {monthEvents.length}개</p>
                     </div>
-                    <div className="flex gap-1">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsCalendarPhotosVisible((isVisible) => !isVisible)}
+                        className={`group flex items-center gap-1.5 rounded-full px-2 py-1.5 transition-colors duration-300 ${
+                          isCalendarPhotosVisible
+                            ? 'bg-[#F0EDFF] text-[#7D6DE0]'
+                            : 'bg-[#F8F5EF] text-[#9A8F82]'
+                        }`}
+                        aria-pressed={isCalendarPhotosVisible}
+                        aria-label="캘린더 사진 표시 전환"
+                      >
+                        <Camera size={14} />
+                        <span
+                          className={`relative h-4 w-7 rounded-full transition-colors duration-300 ${
+                            isCalendarPhotosVisible ? 'bg-[#A594F9]' : 'bg-[#ded6c9]'
+                          }`}
+                          aria-hidden="true"
+                        >
+                          <span
+                            className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white shadow-[0_2px_6px_rgba(47,36,23,0.18)] transition-transform duration-300 ease-out ${
+                              isCalendarPhotosVisible ? 'translate-x-3' : 'translate-x-0'
+                            }`}
+                          />
+                        </span>
+                      </button>
                       <button
                         onClick={() =>
                           setCurrentDate(
@@ -2770,6 +3213,18 @@ export default function App() {
                         {renderScheduleColumn('girlfriend', girlfriendEvents)}
                       </div>
                     </div>
+                    <div className="flex justify-center pb-1 pt-5">
+                      <button
+                        type="button"
+                        onClick={openAddModal}
+                        className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#A594F9] text-white shadow-[0_12px_24px_rgba(165,148,249,0.26)]"
+                        aria-label="일정 추가"
+                      >
+                        <Plus size={19} />
+                      </button>
+                    </div>
+                  </div>
+                    </div>
                   </div>
                 </div>
               </>
@@ -2824,6 +3279,8 @@ export default function App() {
               </div>
             ) : (
               <div className="px-6 pb-10 pt-8">
+                <div className="stacked-card stacked-card--sand rounded-[28px]">
+                  <div className="stacked-card__body p-5">
                 <div className="mb-8 flex items-end justify-between">
                   <div>
                     <h2 className="text-2xl font-bold text-[#2f2417]">버킷리스트</h2>
@@ -2936,20 +3393,21 @@ export default function App() {
                     </div>
                   )}
                 </div>
+                <div className="flex justify-center pb-1 pt-8">
+                  <button
+                    type="button"
+                    onClick={openBucketModal}
+                    className="flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#A594F9] text-white shadow-[0_12px_24px_rgba(165,148,249,0.26)]"
+                    aria-label="버킷리스트 추가"
+                  >
+                    <Plus size={19} />
+                  </button>
+                </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
-
-          {activeTab !== 'manner' ? (
-            <button
-              type="button"
-              onClick={activeTab === 'calendar' ? openAddModal : openBucketModal}
-              className="absolute bottom-[5.75rem] left-1/2 z-20 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-2xl bg-[#A594F9] text-white shadow-[0_16px_32px_rgba(165,148,249,0.3)]"
-              aria-label={activeTab === 'calendar' ? '일정 추가' : '버킷리스트 추가'}
-            >
-              <Plus size={26} />
-            </button>
-          ) : null}
 
           <div className="absolute bottom-0 left-0 right-0 grid h-20 grid-cols-3 items-center border-t border-gray-100 bg-white/90 px-6 pb-4 backdrop-blur-lg">
             <button
@@ -3036,6 +3494,117 @@ export default function App() {
                 <p className="whitespace-pre-wrap break-words text-sm font-bold leading-6 text-[#2f2417]">
                   {viewingBucketItem.item.text}
                 </p>
+              </div>
+            </div>
+          ) : null}
+
+          {photoModalDate ? (
+            <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/20 px-5 py-8 backdrop-blur-sm">
+              <div className="max-h-[min(78vh,640px)] w-full max-w-[360px] overflow-y-auto rounded-[28px] bg-white p-5 shadow-[0_24px_70px_rgba(44,32,20,0.24)]">
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-[#9d7b52]">
+                      Calendar Photos
+                    </p>
+                    <h3 className="mt-1 text-xl font-bold text-[#2f2417]">
+                      {formatCalendarDateLabel(photoModalDate)} 사진
+                    </h3>
+                    <p className="mt-1 text-sm text-[#8d7558]">
+                      대표 사진은 캘린더에 썸네일로 보여집니다.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeCalendarPhotoModal}
+                    className="rounded-full bg-gray-100 p-2"
+                    aria-label="사진 관리 닫기"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-[#F0EDFF] px-4 py-4 text-sm font-black text-[#7D6DE0] transition hover:bg-[#E8E3FF]">
+                  <Upload size={16} />
+                  {isPhotoUploading ? '업로드 중...' : '사진 여러 장 업로드'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    disabled={isPhotoUploading}
+                    onChange={uploadCalendarPhotos}
+                    className="sr-only"
+                  />
+                </label>
+
+                {photoUploadError ? (
+                  <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">
+                    {photoUploadError}
+                  </div>
+                ) : null}
+
+                {photoModalPhotos.length > 0 ? (
+                  <div className="mt-5 grid grid-cols-2 gap-3">
+                    {photoModalPhotos.map((photo) => {
+                      const uploaderMeta = photo.uploadedByProfile
+                        ? PROFILE_META[photo.uploadedByProfile]
+                        : null;
+
+                      return (
+                        <div
+                          key={photo.id}
+                          className="overflow-hidden rounded-[20px] bg-[#FDFBF8] shadow-[0_12px_30px_rgba(66,45,18,0.06)]"
+                        >
+                          <div className="relative h-32 bg-[#F8F5EF]">
+                            <img
+                              src={photo.publicUrl}
+                              alt={`${formatCalendarDateLabel(photo.date)} 사진`}
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                            {photo.isCover ? (
+                              <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-black text-[#7D6DE0] shadow-sm">
+                                대표
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="space-y-2 p-3">
+                            <p className="truncate text-[11px] font-bold text-[#8d7558]">
+                              {uploaderMeta
+                                ? `${uploaderMeta.emoji} ${uploaderMeta.displayName}`
+                                : '캘린더 사진'}
+                            </p>
+                            <div className="flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void setCalendarCoverPhoto(photo)}
+                                disabled={photo.isCover}
+                                className="flex min-w-0 flex-1 items-center justify-center gap-1 rounded-full bg-[#F8F5EF] px-2.5 py-2 text-[10px] font-black text-[#918679] disabled:bg-[#F0EDFF] disabled:text-[#7D6DE0]"
+                              >
+                                <Check size={12} />
+                                {photo.isCover ? '대표 사진' : '대표로'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void deleteCalendarPhoto(photo)}
+                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F8F5EF] text-[#B8AEA5] transition hover:text-[#7F766E]"
+                                aria-label="사진 삭제"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-5 rounded-[22px] border-2 border-dashed border-[#f0e3d0] bg-[#fffaf4] px-4 py-10 text-center">
+                    <ImageIcon className="mx-auto text-[#d5c7b6]" size={28} />
+                    <p className="mt-3 text-sm font-bold text-[#a0896d]">
+                      아직 등록된 사진이 없습니다.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           ) : null}
