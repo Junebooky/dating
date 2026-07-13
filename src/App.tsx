@@ -973,6 +973,9 @@ export default function App() {
   const [isBucketModalOpen, setIsBucketModalOpen] = useState(false);
   const [isMannerModalOpen, setIsMannerModalOpen] = useState(false);
   const [photoModalDate, setPhotoModalDate] = useState<string | null>(null);
+  const [previewingCalendarPhoto, setPreviewingCalendarPhoto] = useState<CalendarPhoto | null>(
+    null,
+  );
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [editingMannerReviewId, setEditingMannerReviewId] = useState<number | null>(null);
   const [isWeatherPopupOpen, setIsWeatherPopupOpen] = useState(false);
@@ -1053,6 +1056,7 @@ export default function App() {
       setIsWeatherPopupOpen(false);
       setIsAccountModalOpen(false);
       setPhotoModalDate(null);
+      setPreviewingCalendarPhoto(null);
       setPhotoUploadError(null);
       setIsPhotoUploading(false);
       setWeatherData(null);
@@ -1630,6 +1634,7 @@ export default function App() {
 
   function closeCalendarPhotoModal() {
     setPhotoModalDate(null);
+    setPreviewingCalendarPhoto(null);
     setPhotoUploadError(null);
     setIsPhotoUploading(false);
   }
@@ -1770,6 +1775,9 @@ export default function App() {
       return;
     }
 
+    setPreviewingCalendarPhoto((currentPhoto) =>
+      currentPhoto?.id === photo.id ? null : currentPhoto,
+    );
     setPhotoUploadError(null);
 
     const remainingDatePhotos = sortCalendarPhotos(
@@ -2604,7 +2612,8 @@ export default function App() {
         );
       const datePhotos = photosByDate.get(dateKey) ?? [];
       const coverPhoto = datePhotos.find((photo) => photo.isCover) ?? datePhotos[0];
-      const visibleLaneCount = isCalendarPhotosVisible ? 3 : 4;
+      const hasCoverPhoto = isCalendarPhotosVisible && isCurrentMonth && Boolean(coverPhoto);
+      const visibleLaneCount = isCalendarPhotosVisible ? 2 : 4;
 
       days.push(
         <div
@@ -2619,9 +2628,7 @@ export default function App() {
             }
           }}
           aria-label={`${formatCalendarDateLabel(dateKey)} 선택`}
-          className={`flex flex-col px-1.5 py-2 text-left transition ${
-            isCalendarPhotosVisible ? 'min-h-[160px]' : 'min-h-[124px]'
-          } ${
+          className={`relative flex min-h-[112px] flex-col overflow-hidden px-1.5 py-2 text-left transition ${
             isSelected
               ? 'bg-[#F4F2FF] shadow-[inset_0_0_0_1px_rgba(165,148,249,0.2)]'
               : 'hover:bg-[#fffaf4]'
@@ -2629,7 +2636,7 @@ export default function App() {
             index % 7 === 0 ? '' : 'border-l border-[#f7efe5]'
           } ${!isCurrentMonth ? 'text-gray-300' : 'text-[#2f2417]'}`}
         >
-          <div className="flex items-center justify-center">
+          <div className="relative z-30 flex items-center justify-center">
             <span
               className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-black ${
                 isSelected
@@ -2645,14 +2652,14 @@ export default function App() {
             </span>
           </div>
 
-          {isCalendarPhotosVisible && isCurrentMonth && coverPhoto ? (
+          {hasCoverPhoto && coverPhoto ? (
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
                 openCalendarPhotoModal(dateKey);
               }}
-              className="group relative -mx-1.5 mt-1.5 h-12 overflow-hidden rounded-[9px] bg-[#F8F5EF] shadow-sm transition"
+              className="group absolute inset-x-0 bottom-0 top-8 z-10 overflow-hidden rounded-[9px] bg-[#F8F5EF] shadow-sm transition"
               aria-label={`${formatCalendarDateLabel(dateKey)} 사진 수정`}
             >
               <img
@@ -2662,18 +2669,15 @@ export default function App() {
                 loading="lazy"
               />
               <span className="absolute inset-0 bg-black/0 transition group-hover:bg-black/10" />
-              {datePhotos.length > 1 ? (
-                <span className="absolute bottom-1 right-1 rounded-full bg-black/45 px-1 py-0.5 text-[7px] font-black leading-none text-white">
-                  {datePhotos.length}
-                </span>
-              ) : null}
             </button>
           ) : null}
 
           <div
-            className={`grid gap-1 ${
+            className={`relative grid gap-1 ${
+              hasCoverPhoto ? 'z-0 opacity-45' : 'z-20'
+            } ${
               isCalendarPhotosVisible
-                ? 'mt-1.5 grid-rows-[repeat(3,24px)]'
+                ? 'mt-1.5 grid-rows-[repeat(2,20px)]'
                 : 'mt-2 grid-rows-[repeat(4,28px)]'
             }`}
           >
@@ -2686,7 +2690,7 @@ export default function App() {
                 return (
                   <span
                     key={`empty-lane-${dateKey}-${lane}`}
-                    className={`block ${isCalendarPhotosVisible ? 'h-[24px]' : 'h-[28px]'}`}
+                    className={`block ${isCalendarPhotosVisible ? 'h-[20px]' : 'h-[28px]'}`}
                   />
                 );
               }
@@ -2708,7 +2712,7 @@ export default function App() {
                 <span
                   key={event.id}
                   className={`relative z-10 flex items-center justify-center overflow-hidden px-0.5 py-1 text-center font-black leading-[1.05] shadow-sm ${
-                    isCalendarPhotosVisible ? 'h-[24px] text-[8.5px]' : 'h-[28px] text-[9.5px]'
+                    isCalendarPhotosVisible ? 'h-[20px] text-[7.5px]' : 'h-[28px] text-[9.5px]'
                   } ${segmentClass}`}
                   style={{
                     backgroundColor: tone.bg,
@@ -2745,7 +2749,7 @@ export default function App() {
               </span>
             ) : null}
 
-          {isCalendarPhotosVisible && isCurrentMonth ? (
+          {isCalendarPhotosVisible && isCurrentMonth && !hasCoverPhoto ? (
             <button
               type="button"
               onClick={(event) => {
@@ -3525,7 +3529,7 @@ export default function App() {
 
                 <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-[#F0EDFF] px-4 py-4 text-sm font-black text-[#7D6DE0] transition hover:bg-[#E8E3FF]">
                   <Upload size={16} />
-                  {isPhotoUploading ? '업로드 중...' : '사진 여러 장 업로드'}
+                  {isPhotoUploading ? '업로드 중...' : '사진 업로드'}
                   <input
                     type="file"
                     accept="image/*"
@@ -3554,19 +3558,25 @@ export default function App() {
                           key={photo.id}
                           className="overflow-hidden rounded-[20px] bg-[#FDFBF8] shadow-[0_12px_30px_rgba(66,45,18,0.06)]"
                         >
-                          <div className="relative h-32 bg-[#F8F5EF]">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewingCalendarPhoto(photo)}
+                            className="relative block h-32 w-full overflow-hidden bg-[#F8F5EF] text-left"
+                            aria-label={`${formatCalendarDateLabel(photo.date)} 사진 크게 보기`}
+                          >
                             <img
                               src={photo.publicUrl}
                               alt={`${formatCalendarDateLabel(photo.date)} 사진`}
                               className="h-full w-full object-cover"
                               loading="lazy"
                             />
+                            <span className="absolute inset-0 bg-black/0 transition hover:bg-black/10" />
                             {photo.isCover ? (
                               <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-black text-[#7D6DE0] shadow-sm">
                                 대표
                               </span>
                             ) : null}
-                          </div>
+                          </button>
                           <div className="space-y-2 p-3">
                             <p className="truncate text-[11px] font-bold text-[#8d7558]">
                               {uploaderMeta
@@ -3605,6 +3615,32 @@ export default function App() {
                     </p>
                   </div>
                 )}
+              </div>
+            </div>
+          ) : null}
+
+          {previewingCalendarPhoto ? (
+            <div
+              className="absolute inset-0 z-50 flex items-center justify-center bg-black/55 px-4 py-8 backdrop-blur-sm"
+              onClick={() => setPreviewingCalendarPhoto(null)}
+            >
+              <div
+                className="relative max-h-full w-full max-w-[390px]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => setPreviewingCalendarPhoto(null)}
+                  className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm"
+                  aria-label="확대 사진 닫기"
+                >
+                  <X size={18} />
+                </button>
+                <img
+                  src={previewingCalendarPhoto.publicUrl}
+                  alt={`${formatCalendarDateLabel(previewingCalendarPhoto.date)} 확대 사진`}
+                  className="max-h-[76vh] w-full rounded-[24px] object-contain shadow-[0_24px_70px_rgba(0,0,0,0.34)]"
+                />
               </div>
             </div>
           ) : null}
