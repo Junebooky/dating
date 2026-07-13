@@ -2935,32 +2935,37 @@ export default function App() {
               </div>
             </div>
 
-            <div className="relative pb-9 pt-8">
-              <div className="absolute left-0 right-0 top-8 h-3 overflow-hidden rounded-full bg-[#F4F1EC]">
+            <div className="relative pb-20 pt-9">
+              <div className="absolute left-0 right-0 top-10 h-3 overflow-hidden rounded-full bg-[#F4F1EC]">
                 <div
                   className="h-full rounded-full bg-[#A594F9]"
                   style={{ width: `${loveProgressPercent}%` }}
                 />
               </div>
 
-              {LOVE_MILESTONE_DAYS.map((day) => {
+              {LOVE_MILESTONE_DAYS.map((day, index) => {
                 const markerPosition = (day / LOVE_GOAL_DAYS) * 100;
                 const markerLabelPosition = Math.min(98, Math.max(2, markerPosition));
                 const milestoneDate = formatLoveMilestoneDate(getLoveMilestoneDate(day));
+                const labelTopClass = index % 2 === 0 ? 'top-[58px]' : 'top-[78px]';
 
                 return (
-                  <div
-                    key={day}
-                    className="absolute top-7 flex w-10 -translate-x-1/2 flex-col items-center"
-                    style={{ left: `${markerLabelPosition}%` }}
-                  >
-                    <span className="h-5 w-px bg-[#ded6c9]" />
-                    <span className="mt-1 whitespace-nowrap text-[8px] font-black leading-none text-[#b3a696]">
-                      {day}일
-                    </span>
-                    <span className="mt-0.5 whitespace-nowrap text-[7px] font-bold leading-none text-[#c1b5a7]">
-                      {milestoneDate}
-                    </span>
+                  <div key={day}>
+                    <span
+                      className="absolute top-[36px] h-6 w-px -translate-x-1/2 bg-[#ded6c9]"
+                      style={{ left: `${markerLabelPosition}%` }}
+                    />
+                    <div
+                      className={`absolute ${labelTopClass} flex w-12 -translate-x-1/2 flex-col items-center text-center`}
+                      style={{ left: `${markerLabelPosition}%` }}
+                    >
+                      <span className="block whitespace-nowrap text-[8px] font-black leading-none text-[#b3a696]">
+                        {day}일
+                      </span>
+                      <span className="mt-1 block whitespace-nowrap text-[7px] font-bold leading-none text-[#c1b5a7]">
+                        {milestoneDate}
+                      </span>
+                    </div>
                   </div>
                 );
               })}
