@@ -1,4 +1,11 @@
-import { type ChangeEvent, type FormEvent, type MouseEvent, useEffect, useMemo, useState } from 'react';
+import {
+  type ChangeEvent,
+  type FormEvent,
+  type MouseEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   Bell,
   Calendar as CalendarIcon,
@@ -189,6 +196,7 @@ const MANNER_BASE_TEMPERATURE = 36.5;
 const MANNER_RATING_STEP = 0.1;
 const MANNER_MIN_TEMPERATURE = 30;
 const MANNER_MAX_TEMPERATURE = 45;
+const MANNER_REVIEWS_PER_PAGE = 3;
 const LOVE_START_DATE = new Date(2026, 1, 14);
 const LOVE_GOAL_DAYS = 1000;
 const LOVE_MILESTONE_DAYS = Array.from({ length: 10 }, (_, index) => (index + 1) * 100);
@@ -724,6 +732,81 @@ function formatReviewDate(timestamp: string) {
   }).format(new Date(timestamp));
 }
 
+function getPaginationItems(currentPage: number, totalPages: number) {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const visiblePages = new Set([1, totalPages, currentPage - 1, currentPage, currentPage + 1]);
+  const pages = Array.from(visiblePages)
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((left, right) => left - right);
+  const items: Array<number | string> = [];
+
+  pages.forEach((page, index) => {
+    const previousPage = pages[index - 1];
+    if (previousPage && page - previousPage > 1) {
+      items.push(`ellipsis-${previousPage}`);
+    }
+    items.push(page);
+  });
+
+  return items;
+}
+
+function MannerReviewCard({
+  canManageReview,
+  onEdit,
+  review,
+}: {
+  canManageReview: boolean;
+  onEdit: (review: MannerReview) => void;
+  review: MannerReview;
+}) {
+  const authorMeta = PROFILE_META[review.authorProfile];
+  const reviewDelta = getMannerReviewTemperatureDelta();
+
+  return (
+    <article className="min-h-36 border-t border-[#f2e8da] py-4 first:border-t-0">
+      <div className="flex shrink-0 items-start justify-between gap-3">
+        <p className="text-[11px] font-semibold text-[#8d7558]">
+          {authorMeta.emoji} {authorMeta.displayName}가 남김
+          <span className="ml-2 text-gray-400">{formatReviewDate(review.createdAt)}</span>
+        </p>
+        <div className="flex shrink-0 items-start gap-1">
+          <div className="mr-1 text-right">
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px] font-black"
+              style={{
+                backgroundColor: reviewDelta >= 0 ? '#FBEFEF' : '#EEF4FB',
+                color: reviewDelta >= 0 ? '#D48787' : '#6F99C7',
+              }}
+            >
+              {formatSignedTemperatureDelta(reviewDelta)}
+            </span>
+            <div className="mt-1 text-[10px] font-bold text-gray-400">
+              {MANNER_STATUS_LABELS[review.status]}
+            </div>
+          </div>
+          {canManageReview ? (
+            <button
+              type="button"
+              onClick={() => onEdit(review)}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-gray-300 transition hover:bg-gray-100 hover:text-[#918679]"
+              aria-label="칭찬 수정"
+              title="수정"
+            >
+              <Pencil size={13} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <p className="mt-3 pr-1 text-sm leading-6 text-[#6f5b43]">{review.strengths}</p>
+    </article>
+  );
+}
+
 function formatCalendarDateLabel(dateKey: string) {
   const [, month, day] = dateKey.split('-');
   return `${Number(month)}월 ${Number(day)}일`;
@@ -957,6 +1040,10 @@ export default function App() {
   const [calendarPhotos, setCalendarPhotos] = useState<CalendarPhoto[]>([]);
   const [bucketList, setBucketList] = useState<BucketItem[]>([]);
   const [mannerReviews, setMannerReviews] = useState<MannerReview[]>([]);
+  const [mannerReviewPages, setMannerReviewPages] = useState<Record<AccountProfile, number>>({
+    boyfriend: 1,
+    girlfriend: 1,
+  });
   const [location, setLocation] = useState<WeatherLocation>(() => loadLocation());
   const [activeTab, setActiveTab] = useState<Tab>('calendar');
   const [bucketFilter, setBucketFilter] = useState<BucketFilter>('all');
@@ -1963,6 +2050,10 @@ export default function App() {
     }
 
     setMannerReviews((previousReviews) => [nextReview, ...previousReviews]);
+    setMannerReviewPages((previousPages) => ({
+      ...previousPages,
+      [targetProfile]: 1,
+    }));
     void publishPushNotification({
       body: `${PROFILE_META[currentAccount.profile].displayName}님이 칭찬을 남겼어요.`,
       tag: `manner-${nextReview.id}`,
@@ -2302,6 +2393,15 @@ export default function App() {
     const profileReviews = mannerReviews
       .filter((review) => review.targetProfile === profile)
       .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    const totalReviewPages = Math.ceil(profileReviews.length / MANNER_REVIEWS_PER_PAGE);
+    const currentReviewPage = Math.min(
+      Math.max(mannerReviewPages[profile], 1),
+      Math.max(totalReviewPages, 1),
+    );
+    const paginatedReviews = profileReviews.slice(
+      (currentReviewPage - 1) * MANNER_REVIEWS_PER_PAGE,
+      currentReviewPage * MANNER_REVIEWS_PER_PAGE,
+    );
     const temperature = calculateMannerTemperature(profile, mannerReviews);
     const temperatureColor = temperature < MANNER_BASE_TEMPERATURE ? '#918679' : profileTone.bg;
     const temperatureOpacity = temperature >= MANNER_BASE_TEMPERATURE + 1 ? 0.82 : 0.68;
@@ -2379,59 +2479,91 @@ export default function App() {
           </div>
 
           {profileReviews.length > 0 ? (
-            <div className="scrollbar-hide max-h-[340px] overflow-y-auto pr-1">
-              {profileReviews.map((review) => {
-                const authorMeta = PROFILE_META[review.authorProfile];
-                const canManageReview = currentAccount?.profile === review.authorProfile;
-                const reviewDelta = getMannerReviewTemperatureDelta();
-
-                return (
-                  <div
+            <div>
+              <div
+                key={currentReviewPage}
+                aria-live="polite"
+                className="scrollbar-hide touch-pan-y overflow-y-auto overscroll-contain pr-1 [-webkit-overflow-scrolling:touch]"
+                style={{ height: Math.min(profileReviews.length, MANNER_REVIEWS_PER_PAGE) * 144 }}
+              >
+                {paginatedReviews.map((review) => (
+                  <MannerReviewCard
                     key={review.id}
-                    className="border-t border-[#f2e8da] py-4 first:border-t-0"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-semibold text-[#8d7558]">
-                          {authorMeta.emoji} {authorMeta.displayName}가 남김
-                          <span className="ml-2 text-gray-400">
-                            {formatReviewDate(review.createdAt)}
-                          </span>
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-start gap-1">
-                        <div className="mr-1 text-right">
-                          <span
-                            className="rounded-full px-2 py-0.5 text-[10px] font-black"
-                            style={{
-                              backgroundColor: reviewDelta >= 0 ? '#FBEFEF' : '#EEF4FB',
-                              color: reviewDelta >= 0 ? '#D48787' : '#6F99C7',
-                            }}
-                          >
-                            {formatSignedTemperatureDelta(reviewDelta)}
-                          </span>
-                          <div className="mt-1 text-[10px] font-bold text-gray-400">
-                            {MANNER_STATUS_LABELS[review.status]}
-                          </div>
-                        </div>
-                        {canManageReview ? (
-                          <button
-                            type="button"
-                            onClick={() => openEditMannerReviewModal(review)}
-                            className="flex h-7 w-7 items-center justify-center rounded-full text-gray-300 transition hover:bg-gray-100 hover:text-[#918679]"
-                            aria-label="칭찬 수정"
-                            title="수정"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
+                    review={review}
+                    canManageReview={currentAccount?.profile === review.authorProfile}
+                    onEdit={openEditMannerReviewModal}
+                  />
+                ))}
+              </div>
 
-                    <p className="mt-3 text-sm leading-6 text-[#6f5b43]">{review.strengths}</p>
-                  </div>
-                );
-              })}
+              {totalReviewPages > 1 ? (
+                <nav
+                  className="mt-3 flex items-center justify-center gap-1 border-t border-[#f2e8da] pt-4"
+                  aria-label={`${profileMeta.displayName} 칭찬 페이지`}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMannerReviewPages((previousPages) => ({
+                        ...previousPages,
+                        [profile]: Math.max(1, currentReviewPage - 1),
+                      }))
+                    }
+                    disabled={currentReviewPage === 1}
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-[#918679] transition hover:bg-[#F8F5EF] disabled:cursor-default disabled:opacity-25"
+                    aria-label="이전 칭찬 페이지"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+
+                  {getPaginationItems(currentReviewPage, totalReviewPages).map((item) =>
+                    typeof item === 'number' ? (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() =>
+                          setMannerReviewPages((previousPages) => ({
+                            ...previousPages,
+                            [profile]: item,
+                          }))
+                        }
+                        className={`flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-xs font-bold transition ${
+                          item === currentReviewPage
+                            ? 'bg-[#A594F9] text-white shadow-[0_5px_12px_rgba(165,148,249,0.24)]'
+                            : 'text-[#918679] hover:bg-[#F8F5EF]'
+                        }`}
+                        aria-current={item === currentReviewPage ? 'page' : undefined}
+                        aria-label={`${item}페이지`}
+                      >
+                        {item}
+                      </button>
+                    ) : (
+                      <span
+                        key={item}
+                        className="flex h-8 w-5 items-center justify-center text-xs text-gray-300"
+                        aria-hidden="true"
+                      >
+                        ···
+                      </span>
+                    ),
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMannerReviewPages((previousPages) => ({
+                        ...previousPages,
+                        [profile]: Math.min(totalReviewPages, currentReviewPage + 1),
+                      }))
+                    }
+                    disabled={currentReviewPage === totalReviewPages}
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-[#918679] transition hover:bg-[#F8F5EF] disabled:cursor-default disabled:opacity-25"
+                    aria-label="다음 칭찬 페이지"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </nav>
+              ) : null}
             </div>
           ) : (
             <div className="mt-3 rounded-2xl border-2 border-dashed border-[#f0e3d0] bg-[#fffaf4] py-8 text-center text-sm text-[#a0896d]">
