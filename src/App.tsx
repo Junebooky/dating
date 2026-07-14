@@ -197,6 +197,8 @@ const MANNER_RATING_STEP = 0.1;
 const MANNER_MIN_TEMPERATURE = 30;
 const MANNER_MAX_TEMPERATURE = 45;
 const MANNER_REVIEWS_PER_PAGE = 3;
+const BUCKET_ITEMS_PER_PAGE = 4;
+const BUCKET_LIST_HEIGHT = BUCKET_ITEMS_PER_PAGE * 64 + (BUCKET_ITEMS_PER_PAGE - 1) * 12;
 const LOVE_START_DATE = new Date(2026, 1, 14);
 const LOVE_GOAL_DAYS = 1000;
 const LOVE_MILESTONE_DAYS = Array.from({ length: 10 }, (_, index) => (index + 1) * 100);
@@ -737,21 +739,15 @@ function getPaginationItems(currentPage: number, totalPages: number) {
     return Array.from({ length: totalPages }, (_, index) => index + 1);
   }
 
-  const visiblePages = new Set([1, totalPages, currentPage - 1, currentPage, currentPage + 1]);
-  const pages = Array.from(visiblePages)
-    .filter((page) => page >= 1 && page <= totalPages)
-    .sort((left, right) => left - right);
-  const items: Array<number | string> = [];
+  if (currentPage <= 3) {
+    return [1, 2, 3, 'ellipsis-right', totalPages];
+  }
 
-  pages.forEach((page, index) => {
-    const previousPage = pages[index - 1];
-    if (previousPage && page - previousPage > 1) {
-      items.push(`ellipsis-${previousPage}`);
-    }
-    items.push(page);
-  });
+  if (currentPage >= totalPages - 2) {
+    return [1, 'ellipsis-left', totalPages - 2, totalPages - 1, totalPages];
+  }
 
-  return items;
+  return [1, 'ellipsis-left', currentPage, 'ellipsis-right', totalPages];
 }
 
 function MannerReviewCard({
@@ -1039,6 +1035,12 @@ export default function App() {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [calendarPhotos, setCalendarPhotos] = useState<CalendarPhoto[]>([]);
   const [bucketList, setBucketList] = useState<BucketItem[]>([]);
+  const [bucketPages, setBucketPages] = useState<Record<BucketFilter, number>>({
+    all: 1,
+    pending: 1,
+    ready: 1,
+    completed: 1,
+  });
   const [mannerReviews, setMannerReviews] = useState<MannerReview[]>([]);
   const [mannerReviewPages, setMannerReviewPages] = useState<Record<AccountProfile, number>>({
     boyfriend: 1,
@@ -1296,6 +1298,15 @@ export default function App() {
 
     return bucketList.filter((item) => item.status === bucketFilter);
   }, [bucketFilter, bucketList]);
+  const totalBucketPages = Math.ceil(filteredBucketList.length / BUCKET_ITEMS_PER_PAGE);
+  const currentBucketPage = Math.min(
+    Math.max(bucketPages[bucketFilter], 1),
+    Math.max(totalBucketPages, 1),
+  );
+  const paginatedBucketList = filteredBucketList.slice(
+    (currentBucketPage - 1) * BUCKET_ITEMS_PER_PAGE,
+    currentBucketPage * BUCKET_ITEMS_PER_PAGE,
+  );
 
   const currentAccount = useMemo(
     () => findAccountByUsername(accounts, session?.username),
@@ -2351,6 +2362,10 @@ export default function App() {
         previousItems.map((item) => (item.id === nextItem.id ? nextItem : item)),
       );
       setBucketFilter(nextItem.status);
+      setBucketPages((previousPages) => ({
+        ...previousPages,
+        [nextItem.status]: 1,
+      }));
       void publishPushNotification({
         body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 "${nextItem.text}" 항목을 수정했어요.`,
         tag: `bucket-${nextItem.id}`,
@@ -2376,6 +2391,10 @@ export default function App() {
 
     setBucketList((previousItems) => [nextItem, ...previousItems]);
     setBucketFilter(nextItem.status);
+    setBucketPages((previousPages) => ({
+      ...previousPages,
+      [nextItem.status]: 1,
+    }));
     void publishPushNotification({
       body: `${PROFILE_META[currentAccount?.profile ?? 'boyfriend'].displayName}님이 "${nextItem.text}" 항목을 추가했어요.`,
       tag: `bucket-${nextItem.id}`,
@@ -3459,12 +3478,16 @@ export default function App() {
                   ))}
                 </div>
 
-                <div className="space-y-3">
+                <div
+                  className="space-y-3 overflow-hidden"
+                  style={{ height: BUCKET_LIST_HEIGHT }}
+                  aria-live="polite"
+                >
                   {filteredBucketList.length > 0 ? (
-                    filteredBucketList.map((item) => (
+                    paginatedBucketList.map((item) => (
                       <div
                         key={item.id}
-                        className={`flex items-center justify-between gap-3 rounded-[24px] p-4 transition ${
+                        className={`flex h-16 items-center justify-between gap-3 rounded-[22px] px-4 transition ${
                           item.status === 'completed'
                             ? 'bg-[#FBF7F7]'
                             : 'bg-[#FDFBF8] shadow-sm'
@@ -3529,12 +3552,84 @@ export default function App() {
                       </div>
                     ))
                   ) : (
-                    <div className="rounded-[24px] border-2 border-dashed border-[#f0e3d0] bg-[#fffaf4] py-10 text-center text-sm text-[#a0896d]">
+                    <div className="flex h-full items-center justify-center rounded-[24px] border-2 border-dashed border-[#f0e3d0] bg-[#fffaf4] px-5 text-center text-sm text-[#a0896d]">
                       선택한 상태의 버킷리스트가 없습니다.
                     </div>
                   )}
                 </div>
-                <div className="flex justify-center pb-1 pt-8">
+
+                <div className="mt-3 flex h-12 items-center justify-center">
+                  {filteredBucketList.length > 0 ? (
+                    <nav
+                      className="flex items-center justify-center gap-1"
+                      aria-label={`${BUCKET_FILTER_LABELS[bucketFilter]} 버킷리스트 페이지`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setBucketPages((previousPages) => ({
+                            ...previousPages,
+                            [bucketFilter]: Math.max(1, currentBucketPage - 1),
+                          }))
+                        }
+                        disabled={currentBucketPage === 1}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[#918679] transition hover:bg-[#F8F5EF] disabled:cursor-default disabled:opacity-25"
+                        aria-label="이전 버킷리스트 페이지"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+
+                      {getPaginationItems(currentBucketPage, totalBucketPages).map((item) =>
+                        typeof item === 'number' ? (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() =>
+                              setBucketPages((previousPages) => ({
+                                ...previousPages,
+                                [bucketFilter]: item,
+                              }))
+                            }
+                            className={`flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-xs font-bold transition ${
+                              item === currentBucketPage
+                                ? 'bg-[#A594F9] text-white shadow-[0_5px_12px_rgba(165,148,249,0.24)]'
+                                : 'text-[#918679] hover:bg-[#F8F5EF]'
+                            }`}
+                            aria-current={item === currentBucketPage ? 'page' : undefined}
+                            aria-label={`${item}페이지`}
+                          >
+                            {item}
+                          </button>
+                        ) : (
+                          <span
+                            key={item}
+                            className="flex h-8 w-5 items-center justify-center text-xs text-gray-300"
+                            aria-hidden="true"
+                          >
+                            ···
+                          </span>
+                        ),
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setBucketPages((previousPages) => ({
+                            ...previousPages,
+                            [bucketFilter]: Math.min(totalBucketPages, currentBucketPage + 1),
+                          }))
+                        }
+                        disabled={currentBucketPage === totalBucketPages}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[#918679] transition hover:bg-[#F8F5EF] disabled:cursor-default disabled:opacity-25"
+                        aria-label="다음 버킷리스트 페이지"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </nav>
+                  ) : null}
+                </div>
+
+                <div className="flex justify-center pb-1 pt-4">
                   <button
                     type="button"
                     onClick={openBucketModal}
