@@ -707,7 +707,7 @@ async function fetchKmaWeatherSnapshot(
   signal: AbortSignal,
 ): Promise<WeatherSnapshot> {
   const snapshot = await fetchWeatherResource<WeatherSnapshot>(
-    buildKmaWeatherApiUrl(location),
+    buildKmaWeatherApiUrl(location, { includeEnvironment: 0 }),
     signal,
   );
 
@@ -723,7 +723,7 @@ async function fetchKmaWeatherSnapshot(
   };
 }
 
-async function fetchWeatherEnvironmentSnapshot(
+export async function fetchWeatherEnvironmentSnapshot(
   location: WeatherLocation,
   signal: AbortSignal,
 ): Promise<WeatherSnapshot | null> {
@@ -750,10 +750,19 @@ function mergeHourlyEnvironment(
     environmentHourly.map((item) => [`${item.dateKey}-${item.timeLabel}`, item]),
   );
 
-  return hourly.map((item) => ({
-    ...item,
-    ...environmentByKey.get(`${item.dateKey}-${item.timeLabel}`),
-  }));
+  return hourly.map((item) => {
+    const environment = environmentByKey.get(`${item.dateKey}-${item.timeLabel}`);
+
+    return {
+      ...item,
+      pm10: environment?.pm10 ?? item.pm10,
+      pm10Grade: environment?.pm10Grade ?? item.pm10Grade,
+      pm25: environment?.pm25 ?? item.pm25,
+      pm25Grade: environment?.pm25Grade ?? item.pm25Grade,
+      uvGrade: environment?.uvGrade ?? item.uvGrade,
+      uvIndex: environment?.uvIndex ?? item.uvIndex,
+    };
+  });
 }
 
 function mergeDailyEnvironment(
@@ -762,10 +771,34 @@ function mergeDailyEnvironment(
 ) {
   const environmentByDate = new Map(environmentDaily.map((item) => [item.dateKey, item]));
 
-  return daily.map((item) => ({
-    ...item,
-    ...environmentByDate.get(item.dateKey),
-  }));
+  return daily.map((item) => {
+    const environment = environmentByDate.get(item.dateKey);
+
+    return {
+      ...item,
+      sunriseTime: environment?.sunriseTime ?? item.sunriseTime,
+      sunsetTime: environment?.sunsetTime ?? item.sunsetTime,
+    };
+  });
+}
+
+export function mergeWeatherEnvironmentSnapshot(
+  weatherSnapshot: WeatherSnapshot,
+  environmentSnapshot: WeatherSnapshot,
+): WeatherSnapshot {
+  return {
+    ...weatherSnapshot,
+    current: {
+      ...weatherSnapshot.current,
+      environment: {
+        ...weatherSnapshot.current.environment,
+        ...environmentSnapshot.current.environment,
+      },
+    },
+    hourly: mergeHourlyEnvironment(weatherSnapshot.hourly, environmentSnapshot.hourly),
+    daily: mergeDailyEnvironment(weatherSnapshot.daily, environmentSnapshot.daily),
+    providerLabel: environmentSnapshot.providerLabel ?? weatherSnapshot.providerLabel,
+  };
 }
 
 async function fetchOpenMeteoWeatherSnapshot(

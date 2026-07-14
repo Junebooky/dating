@@ -73,6 +73,13 @@ function sendJson(response, statusCode, payload) {
   }
 
   response.setHeader('Content-Type', 'application/json');
+  if (statusCode >= 200 && statusCode < 300) {
+    response.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
+    response.setHeader(
+      'Vercel-CDN-Cache-Control',
+      'max-age=300, stale-while-revalidate=600',
+    );
+  }
   response.end(JSON.stringify(payload));
 }
 
@@ -1247,6 +1254,7 @@ export default async function handler(request, response) {
     const grid = convertLatLonToKmaGrid(latitude, longitude);
     const nowcastBase = getUltraNowcastBaseTime();
     const villageBase = getVillageForecastBaseTime();
+    const includeEnvironment = requestUrl.searchParams.get('includeEnvironment') !== '0';
     const commonParams = {
       pageNo: 1,
       numOfRows: 1000,
@@ -1254,6 +1262,21 @@ export default async function handler(request, response) {
       nx: grid.nx,
       ny: grid.ny,
     };
+
+    const environmentRequest = includeEnvironment
+      ? fetchEnvironmentData(latitude, longitude, label).catch((error) => {
+          console.warn('Environment data failed', error);
+          return {
+            current: {},
+            daily: [],
+            hourly: [],
+          };
+        })
+      : Promise.resolve({
+          current: {},
+          daily: [],
+          hourly: [],
+        });
 
     const [nowcastItems, forecastItems, environment] = await Promise.all([
       fetchKma(
@@ -1272,14 +1295,7 @@ export default async function handler(request, response) {
         },
         authKey,
       ),
-      fetchEnvironmentData(latitude, longitude, label).catch((error) => {
-        console.warn('Environment data failed', error);
-        return {
-          current: {},
-          daily: [],
-          hourly: [],
-        };
-      }),
+      environmentRequest,
     ]);
 
     const filteredNowcastItems = nowcastItems.filter((item) =>

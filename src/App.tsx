@@ -41,6 +41,7 @@ import {
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import {
   DEFAULT_LOCATION,
+  fetchWeatherEnvironmentSnapshot,
   fetchWeatherSnapshot,
   formatCurrentDateTime,
   formatEnvironmentMetric,
@@ -48,6 +49,7 @@ import {
   formatTemperature,
   formatWindSpeed,
   getPrecipitationPercent,
+  mergeWeatherEnvironmentSnapshot,
   type WeatherLocation,
   type WeatherSnapshot,
 } from './lib/weather';
@@ -191,7 +193,14 @@ interface MannerReviewDraft {
   strengths: string;
 }
 
+interface StoredWeatherSnapshot {
+  savedAt: number;
+  snapshot: WeatherSnapshot;
+}
+
 const LOCATION_STORAGE_KEY = 'dating:location';
+const WEATHER_SNAPSHOT_STORAGE_KEY = 'dating:weather-snapshot';
+const WEATHER_SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const MANNER_BASE_TEMPERATURE = 36.5;
 const MANNER_RATING_STEP = 0.1;
 const MANNER_MIN_TEMPERATURE = 30;
@@ -895,6 +904,69 @@ function loadLocation() {
   };
 }
 
+function isStoredWeatherSnapshot(value: unknown): value is StoredWeatherSnapshot {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const stored = value as StoredWeatherSnapshot;
+  const snapshot = stored.snapshot;
+
+  return (
+    typeof stored.savedAt === 'number' &&
+    Number.isFinite(stored.savedAt) &&
+    Boolean(snapshot?.current && typeof snapshot.current === 'object') &&
+    Array.isArray(snapshot?.hourly) &&
+    Array.isArray(snapshot?.daily) &&
+    isStoredWeatherLocation(snapshot?.location)
+  );
+}
+
+function isSameWeatherArea(left: WeatherLocation, right: WeatherLocation) {
+  return (
+    Math.abs(left.latitude - right.latitude) < 0.05 &&
+    Math.abs(left.longitude - right.longitude) < 0.05
+  );
+}
+
+function loadWeatherSnapshot(location: WeatherLocation) {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const stored = JSON.parse(
+      window.localStorage.getItem(WEATHER_SNAPSHOT_STORAGE_KEY) ?? 'null',
+    );
+
+    if (!isStoredWeatherSnapshot(stored)) {
+      return null;
+    }
+
+    const isFreshEnough = Date.now() - stored.savedAt <= WEATHER_SNAPSHOT_MAX_AGE_MS;
+    const isNearbyLocation = isSameWeatherArea(stored.snapshot.location, location);
+
+    return isFreshEnough && isNearbyLocation ? stored.snapshot : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistWeatherSnapshot(snapshot: WeatherSnapshot) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    writeStorage<StoredWeatherSnapshot>(WEATHER_SNAPSHOT_STORAGE_KEY, {
+      savedAt: Date.now(),
+      snapshot,
+    });
+  } catch {
+    // Weather refresh should still succeed if device storage is unavailable.
+  }
+}
+
 function daysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate();
 }
@@ -1083,7 +1155,9 @@ export default function App() {
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
-  const [weatherData, setWeatherData] = useState<WeatherSnapshot | null>(null);
+  const [weatherData, setWeatherData] = useState<WeatherSnapshot | null>(() =>
+    loadWeatherSnapshot(location),
+  );
   const [weatherError, setWeatherError] = useState<string | null>(null);
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
   const [pushNotificationStatus, setPushNotificationStatus] =
@@ -1186,24 +1260,62 @@ export default function App() {
     }
 
     const controller = new AbortController();
-    setIsWeatherLoading(true);
+    const environmentRequest = fetchWeatherEnvironmentSnapshot(location, controller.signal).catch(
+      (error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return null;
+        }
+
+        console.warn('Weather environment refresh failed.', error);
+        return null;
+      },
+    );
+
+    setIsWeatherLoading(weatherData == null);
     setWeatherError(null);
 
     fetchWeatherSnapshot(location, controller.signal)
       .then((snapshot) => {
-        setWeatherData(snapshot);
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        const visibleSnapshot =
+          weatherData && isSameWeatherArea(weatherData.location, snapshot.location)
+            ? mergeWeatherEnvironmentSnapshot(snapshot, weatherData)
+            : snapshot;
+        setWeatherData(visibleSnapshot);
+        persistWeatherSnapshot(visibleSnapshot);
+        setIsWeatherLoading(false);
+        setIsRefreshingLocation(false);
+
+        void environmentRequest.then((environmentSnapshot) => {
+          if (!environmentSnapshot || controller.signal.aborted) {
+            return;
+          }
+
+          const mergedSnapshot = mergeWeatherEnvironmentSnapshot(
+            visibleSnapshot,
+            environmentSnapshot,
+          );
+          setWeatherData(mergedSnapshot);
+          persistWeatherSnapshot(mergedSnapshot);
+        });
       })
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') {
           return;
         }
 
-        setWeatherData(null);
         setWeatherError(
           error instanceof Error ? error.message : '날씨 정보를 불러오지 못했습니다.',
         );
       })
       .finally(() => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
         setIsWeatherLoading(false);
         setIsRefreshingLocation(false);
       });
@@ -1646,14 +1758,23 @@ export default function App() {
         const latitude = Number(coords.latitude.toFixed(6));
         const longitude = Number(coords.longitude.toFixed(6));
 
-        setLocation({
+        const nextLocation: WeatherLocation = {
           label: '현재 위치',
           latitude,
           longitude,
           source: 'gps',
           coordsLabel: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
           updatedAt: Date.now(),
-        });
+        };
+
+        setLocation((currentLocation) =>
+          options.silentFallback &&
+          currentLocation.source === nextLocation.source &&
+          Math.abs(currentLocation.latitude - nextLocation.latitude) < 0.001 &&
+          Math.abs(currentLocation.longitude - nextLocation.longitude) < 0.001
+            ? currentLocation
+            : nextLocation,
+        );
       },
       () => {
         setLocation(fallbackLocation);

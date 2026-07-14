@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/weather/kma.js": {
+      "regions": ["icn1"]
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/upcoming",
