@@ -2623,16 +2623,13 @@ export default function App() {
               return (
                 <div
                   key={`${profile}-${event.id}`}
-                  className="rounded-[22px] p-4 shadow-[0_10px_30px_rgba(66,45,18,0.04)]"
+                  className="rounded-[22px] p-3 shadow-[0_10px_30px_rgba(66,45,18,0.04)]"
                   style={{ backgroundColor: `${profileTone.bg}12` }}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] font-bold" style={{ color: profileTone.bg }}>
-                        {event.time}
-                      </p>
-                      <h5 className="mt-1 font-bold text-[#2f2417]">{event.title}</h5>
-                    </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-bold" style={{ color: profileTone.bg }}>
+                      {event.time}
+                    </p>
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
@@ -2652,6 +2649,9 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+                  <h5 className="mt-1.5 w-full break-words text-[15px] font-bold leading-6 text-[#2f2417]">
+                    {event.title}
+                  </h5>
 
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     {authorMeta && event.authorUsername ? (
