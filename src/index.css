@@ -69,6 +69,18 @@
     animation: meal-view-unfold 380ms cubic-bezier(0.22, 1, 0.36, 1);
     transform-origin: top center;
   }
+
+  .meal-date-input {
+    appearance: none;
+    min-inline-size: 0;
+    inline-size: 100%;
+    max-inline-size: 100%;
+  }
+
+  .meal-date-input::-webkit-date-and-time-value {
+    min-inline-size: 0;
+    text-align: left;
+  }
 }
 
 @keyframes meal-card-reveal {

@@ -37,55 +37,6 @@ const PROFILE_LABELS: Record<MealProfile, string> = {
   girlfriend: '영주씌',
 };
 
-const MINIMUM_VISIBLE_MEAL_DATES = 5;
-const DEMO_MEALS: MealEntry[] = [
-  {
-    caption: '바삭한 타코와 상큼한 라임. 다음에는 다른 메뉴도 하나씩 같이 먹어보기.',
-    createdAt: '2026-07-28T12:30:00+09:00',
-    date: '2026-07-28',
-    id: -1,
-    publicUrl: '/taco-placeholder.jpg',
-    storagePath: '',
-    title: '타코 플레이트',
-  },
-  {
-    caption: '화덕 향이 좋았던 피자. 도우 끝까지 맛있어서 한 판을 금방 비웠다.',
-    createdAt: '2026-07-26T18:40:00+09:00',
-    date: '2026-07-26',
-    id: -2,
-    publicUrl: '/meal-demo-pizza.jpg',
-    storagePath: '',
-    title: '화덕 피자',
-  },
-  {
-    caption: '바질 향이 산뜻했던 파스타. 다음에는 크림 메뉴도 같이 먹어보기.',
-    createdAt: '2026-07-24T13:10:00+09:00',
-    date: '2026-07-24',
-    id: -3,
-    publicUrl: '/meal-demo-pasta.jpg',
-    storagePath: '',
-    title: '바질 파스타',
-  },
-  {
-    caption: '연어가 부드럽고 소스가 잘 어울렸던 롤. 가볍게 먹기 좋은 저녁이었다.',
-    createdAt: '2026-07-21T19:20:00+09:00',
-    date: '2026-07-21',
-    id: -4,
-    publicUrl: '/meal-demo-sushi.jpg',
-    storagePath: '',
-    title: '연어 롤',
-  },
-  {
-    caption: '육즙이 가득했던 수제 버거. 감자튀김까지 나눠 먹어서 더 든든했던 날.',
-    createdAt: '2026-07-18T17:50:00+09:00',
-    date: '2026-07-18',
-    id: -5,
-    publicUrl: '/meal-demo-burger.jpg',
-    storagePath: '',
-    title: '수제 버거',
-  },
-];
-
 function parseDate(dateKey: string) {
   return new Date(`${dateKey}T00:00:00`);
 }
@@ -115,20 +66,15 @@ export function MealTable({
   onEdit,
   onPreview,
 }: MealTableProps) {
-  const visibleEntries = useMemo(() => {
-    const actualDates = new Set(entries.map((entry) => entry.date));
-    const fillerCount = Math.max(0, MINIMUM_VISIBLE_MEAL_DATES - actualDates.size);
-    const demoEntries = DEMO_MEALS.filter((entry) => !actualDates.has(entry.date)).slice(
-      0,
-      fillerCount,
-    );
-
-    return [...entries, ...demoEntries].sort(
+  const visibleEntries = useMemo(
+    () =>
+      [...entries].sort(
       (left, right) =>
         right.date.localeCompare(left.date) ||
         new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-    );
-  }, [entries]);
+      ),
+    [entries],
+  );
   const dates = useMemo(
     () => Array.from(new Set(visibleEntries.map((entry) => entry.date))).sort().reverse(),
     [visibleEntries],
@@ -152,14 +98,21 @@ export function MealTable({
       year,
     })).sort((left, right) => right.year - left.year);
   }, [dates]);
-  const [selectedDate, setSelectedDate] = useState(dates[0] ?? DEMO_MEALS[0].date);
+  const [selectedDate, setSelectedDate] = useState(dates[0] ?? '');
   const [entryIndex, setEntryIndex] = useState(0);
   const [isAllDatesOpen, setIsAllDatesOpen] = useState(false);
   const dateRailRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (dates.length === 0) {
+      if (selectedDate) {
+        setSelectedDate('');
+      }
+      return;
+    }
+
     if (!dates.includes(selectedDate)) {
-      setSelectedDate(dates[0] ?? DEMO_MEALS[0].date);
+      setSelectedDate(dates[0]);
     }
   }, [dates, selectedDate]);
 
@@ -168,13 +121,12 @@ export function MealTable({
     [selectedDate, visibleEntries],
   );
   const safeEntryIndex = Math.min(entryIndex, Math.max(selectedEntries.length - 1, 0));
-  const selectedEntry = selectedEntries[safeEntryIndex] ?? visibleEntries[0];
-  const dateBadge = formatDateBadge(selectedEntry.date);
-  const isDemo = selectedEntry.id < 0;
+  const selectedEntry = selectedEntries[safeEntryIndex];
+  const dateBadge = selectedEntry ? formatDateBadge(selectedEntry.date) : null;
   const canManage =
-    !isDemo &&
+    Boolean(selectedEntry) &&
     Boolean(currentProfile) &&
-    selectedEntry.uploadedByProfile === currentProfile;
+    selectedEntry?.uploadedByProfile === currentProfile;
 
   function selectDate(dateKey: string) {
     setSelectedDate(dateKey);
@@ -338,10 +290,11 @@ export function MealTable({
                   })}
                 </div>
 
-                <div
-                  key={`${selectedEntry.date}-${selectedEntry.id}`}
-                  className="meal-card-reveal relative mt-4 flex min-h-0 flex-1 flex-col"
-                >
+                {selectedEntry && dateBadge ? (
+                  <div
+                    key={`${selectedEntry.date}-${selectedEntry.id}`}
+                    className="meal-card-reveal relative mt-4 flex min-h-0 flex-1 flex-col"
+                  >
                   <button
                     type="button"
                     onClick={() => onPreview(selectedEntry)}
@@ -372,18 +325,11 @@ export function MealTable({
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-bold text-[#9A8F82]">
                           <span className="flex items-center gap-1 text-[#D48787]">
                             <UtensilsCrossed size={12} />
-                            {isDemo
-                              ? '우리의 첫 식사 기록'
-                              : selectedEntry.uploadedByProfile
-                                ? `${PROFILE_LABELS[selectedEntry.uploadedByProfile]}가 남김`
-                                : '함께 남긴 기록'}
+                            {selectedEntry.uploadedByProfile
+                              ? `${PROFILE_LABELS[selectedEntry.uploadedByProfile]}가 남김`
+                              : '함께 남긴 기록'}
                           </span>
                           <span>{formatEntryTime(selectedEntry.createdAt)}</span>
-                          {isDemo ? (
-                            <span className="rounded-full bg-[#F8F5EF] px-2 py-0.5 text-[9px] text-[#9A8F82]">
-                              미리보기
-                            </span>
-                          ) : null}
                         </div>
                       </div>
 
@@ -422,7 +368,20 @@ export function MealTable({
                       </p>
                     </div>
                   </div>
-                </div>
+                  </div>
+                ) : (
+                  <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#F8F5EF] text-[#D48787]">
+                      <UtensilsCrossed size={22} />
+                    </div>
+                    <h3 className="mt-4 text-base font-black text-[#2f2417]">
+                      아직 식사 기록이 없어요
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-[#918679]">
+                      함께 먹은 첫 메뉴를 기록해 보세요.
+                    </p>
+                  </div>
+                )}
 
                 <div className="mt-2 flex h-8 shrink-0 items-center justify-between">
                   {selectedEntries.length > 1 ? (

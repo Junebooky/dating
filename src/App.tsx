@@ -4407,9 +4407,9 @@ export default function App() {
           ) : null}
 
           {isMealModalOpen ? (
-            <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/20 px-5 py-8 backdrop-blur-sm">
+            <div className="absolute inset-0 z-40 flex touch-pan-y items-center justify-center overflow-hidden overscroll-none bg-black/20 px-4 py-8 backdrop-blur-sm">
               <form
-                className="max-h-[min(82vh,680px)] w-full max-w-[360px] overflow-y-auto rounded-[28px] bg-white p-5 shadow-[0_24px_70px_rgba(44,32,20,0.24)]"
+                className="box-border max-h-[min(82dvh,680px)] w-full min-w-0 max-w-[360px] touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain rounded-[28px] bg-white p-5 shadow-[0_24px_70px_rgba(44,32,20,0.24)]"
                 onSubmit={saveMealEntry}
               >
                 <div className="mb-5 flex items-start justify-between gap-4">
@@ -4436,8 +4436,8 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="space-y-4">
-                  <label className="block cursor-pointer overflow-hidden rounded-[22px] bg-[#F8F5EF]">
+                <div className="min-w-0 space-y-4">
+                  <label className="block min-w-0 cursor-pointer overflow-hidden rounded-[22px] bg-[#F8F5EF]">
                     {mealPhotoPreviewUrl ? (
                       <div className="relative">
                         <img
@@ -4467,7 +4467,7 @@ export default function App() {
                     />
                   </label>
 
-                  <label className="block">
+                  <label className="block min-w-0">
                     <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
                       음식 제목
                     </span>
@@ -4483,11 +4483,11 @@ export default function App() {
                         }))
                       }
                       placeholder="예: 화덕 피자"
-                      className="w-full rounded-2xl bg-[#F8F5EF] px-4 py-3.5 text-sm font-bold text-[#5f5142] outline-none placeholder:text-[#b8aea5]"
+                      className="box-border block w-full min-w-0 max-w-full rounded-2xl bg-[#F8F5EF] px-4 py-3.5 text-sm font-bold text-[#5f5142] outline-none placeholder:text-[#b8aea5]"
                     />
                   </label>
 
-                  <label className="block">
+                  <label className="block min-w-0">
                     <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
                       날짜
                     </span>
@@ -4501,11 +4501,11 @@ export default function App() {
                           date: event.target.value,
                         }))
                       }
-                      className="w-full rounded-2xl bg-[#F8F5EF] px-4 py-3.5 text-sm font-bold text-[#5f5142] outline-none"
+                      className="meal-date-input box-border block w-full min-w-0 max-w-full rounded-2xl bg-[#F8F5EF] px-4 py-3.5 text-sm font-bold text-[#5f5142] outline-none"
                     />
                   </label>
 
-                  <label className="block">
+                  <label className="block min-w-0">
                     <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
                       방명록
                     </span>
@@ -4519,7 +4519,7 @@ export default function App() {
                       }
                       maxLength={300}
                       placeholder="오늘 먹은 메뉴와 기억하고 싶은 이야기를 적어주세요."
-                      className="min-h-[104px] w-full resize-none rounded-2xl bg-[#F8F5EF] px-4 py-4 text-sm leading-6 text-[#5f5142] outline-none placeholder:text-[#b8aea5]"
+                      className="box-border min-h-[104px] w-full min-w-0 max-w-full resize-none rounded-2xl bg-[#F8F5EF] px-4 py-4 text-sm leading-6 text-[#5f5142] outline-none placeholder:text-[#b8aea5]"
                     />
                     <span className="mt-1.5 block text-right text-[10px] font-bold text-[#b8aea5]">
                       {mealDraft.caption.length}/300
