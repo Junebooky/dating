@@ -26,10 +26,12 @@ import {
   Trash2,
   Upload,
   UserRound,
+  UtensilsCrossed,
   X,
 } from 'lucide-react';
 
 import { GoogleWeatherPopup } from './components/GoogleWeatherPopup';
+import { type MealEntry, MealTable } from './components/MealTable';
 import { WeatherWidget } from './components/WeatherWidget';
 import {
   getInitialPushNotificationStatus,
@@ -54,7 +56,7 @@ import {
   type WeatherSnapshot,
 } from './lib/weather';
 
-type Tab = 'calendar' | 'manner' | 'bucket';
+type Tab = 'calendar' | 'meal' | 'manner' | 'bucket';
 type BucketStatus = 'pending' | 'ready' | 'completed';
 type BucketFilter = 'all' | BucketStatus;
 type AccountProfile = 'boyfriend' | 'girlfriend';
@@ -154,6 +156,18 @@ interface CalendarPhotoRow {
   uploaded_by_username?: string | null;
 }
 
+interface MealEntryRow {
+  caption?: string | null;
+  created_at?: string | null;
+  date?: string | null;
+  id?: number | null;
+  public_url?: string | null;
+  storage_path?: string | null;
+  title?: string | null;
+  uploaded_by_profile?: string | null;
+  uploaded_by_username?: string | null;
+}
+
 interface BucketItemRow {
   id?: number | null;
   status?: string | null;
@@ -193,6 +207,13 @@ interface MannerReviewDraft {
   strengths: string;
 }
 
+interface MealDraft {
+  caption: string;
+  date: string;
+  file: File | null;
+  title: string;
+}
+
 interface StoredWeatherSnapshot {
   savedAt: number;
   snapshot: WeatherSnapshot;
@@ -212,6 +233,7 @@ const LOVE_START_DATE = new Date(2026, 1, 14);
 const LOVE_GOAL_DAYS = 1000;
 const LOVE_MILESTONE_DAYS = Array.from({ length: 10 }, (_, index) => (index + 1) * 100);
 const CALENDAR_PHOTO_BUCKET = 'calendar-photos';
+const MEAL_PHOTO_BUCKET = 'meal-photos';
 const CALENDAR_CELL_TITLE_MAX_LENGTH = 18;
 const EVENT_MEMO_META_PREFIX = '__dear_days_event_meta__';
 
@@ -615,6 +637,53 @@ function sortCalendarPhotos(photos: CalendarPhoto[]) {
   return [...photos].sort(
     (left, right) =>
       Number(right.isCover) - Number(left.isCover) ||
+      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+  );
+}
+
+function normalizeMealEntryRow(row: MealEntryRow, index: number): MealEntry | null {
+  if (
+    typeof row.date !== 'string' ||
+    typeof row.storage_path !== 'string' ||
+    typeof row.public_url !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    id: typeof row.id === 'number' ? row.id : index + 1,
+    date: row.date,
+    caption: typeof row.caption === 'string' ? row.caption : '',
+    title: typeof row.title === 'string' && row.title.trim() ? row.title : '맛있는 한 끼',
+    storagePath: row.storage_path,
+    publicUrl: row.public_url,
+    uploadedByUsername:
+      typeof row.uploaded_by_username === 'string' ? row.uploaded_by_username : undefined,
+    uploadedByProfile: isAccountProfile(row.uploaded_by_profile)
+      ? row.uploaded_by_profile
+      : undefined,
+    createdAt: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
+  };
+}
+
+function toMealEntryRow(entry: MealEntry) {
+  return {
+    id: entry.id,
+    date: entry.date,
+    caption: entry.caption,
+    title: entry.title,
+    storage_path: entry.storagePath,
+    public_url: entry.publicUrl,
+    uploaded_by_username: entry.uploadedByUsername ?? null,
+    uploaded_by_profile: entry.uploadedByProfile ?? null,
+    created_at: entry.createdAt,
+  };
+}
+
+function sortMealEntries(entries: MealEntry[]) {
+  return [...entries].sort(
+    (left, right) =>
+      right.date.localeCompare(left.date) ||
       new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
   );
 }
@@ -1106,6 +1175,7 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [calendarPhotos, setCalendarPhotos] = useState<CalendarPhoto[]>([]);
+  const [mealEntries, setMealEntries] = useState<MealEntry[]>([]);
   const [bucketList, setBucketList] = useState<BucketItem[]>([]);
   const [bucketPages, setBucketPages] = useState<Record<BucketFilter, number>>({
     all: 1,
@@ -1129,15 +1199,26 @@ export default function App() {
   const [mannerReviewDraft, setMannerReviewDraft] = useState<MannerReviewDraft>(
     EMPTY_MANNER_REVIEW_DRAFT,
   );
+  const [mealDraft, setMealDraft] = useState<MealDraft>(() => ({
+    caption: '',
+    date: formatYMD(new Date()),
+    file: null,
+    title: '',
+  }));
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isBucketModalOpen, setIsBucketModalOpen] = useState(false);
   const [isMannerModalOpen, setIsMannerModalOpen] = useState(false);
+  const [isMealModalOpen, setIsMealModalOpen] = useState(false);
   const [photoModalDate, setPhotoModalDate] = useState<string | null>(null);
   const [previewingCalendarPhoto, setPreviewingCalendarPhoto] = useState<CalendarPhoto | null>(
     null,
   );
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
+  const [isMealSaving, setIsMealSaving] = useState(false);
+  const [editingMealEntryId, setEditingMealEntryId] = useState<number | null>(null);
+  const [mealPhotoPreviewUrl, setMealPhotoPreviewUrl] = useState<string | null>(null);
+  const [previewingMealEntry, setPreviewingMealEntry] = useState<MealEntry | null>(null);
   const [editingMannerReviewId, setEditingMannerReviewId] = useState<number | null>(null);
   const [isWeatherPopupOpen, setIsWeatherPopupOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
@@ -1153,6 +1234,7 @@ export default function App() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [mannerReviewError, setMannerReviewError] = useState<string | null>(null);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
+  const [mealError, setMealError] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
   const [weatherData, setWeatherData] = useState<WeatherSnapshot | null>(() =>
@@ -1222,6 +1304,12 @@ export default function App() {
       setPreviewingCalendarPhoto(null);
       setPhotoUploadError(null);
       setIsPhotoUploading(false);
+      setIsMealModalOpen(false);
+      setIsMealSaving(false);
+      setEditingMealEntryId(null);
+      setMealPhotoPreviewUrl(null);
+      setPreviewingMealEntry(null);
+      setMealError(null);
       setWeatherData(null);
       setWeatherError(null);
       setLocationError(null);
@@ -1233,6 +1321,7 @@ export default function App() {
       setMannerReviewError(null);
       setEvents([]);
       setCalendarPhotos([]);
+      setMealEntries([]);
       setBucketList([]);
       setViewingBucketItem(null);
       setMannerReviews([]);
@@ -1435,6 +1524,10 @@ export default function App() {
   const loveProgressPercent = getLoveProgressPercent(loveDayCount);
   const loveRunnerPosition = Math.min(96, Math.max(4, loveProgressPercent));
   const editingEvent = editingEventId == null ? null : events.find((event) => event.id === editingEventId);
+  const editingMealEntry =
+    editingMealEntryId == null
+      ? null
+      : mealEntries.find((entry) => entry.id === editingMealEntryId);
   const editingBucketItem =
     editingBucketItemId == null ? null : bucketList.find((item) => item.id === editingBucketItemId);
   const editingMannerReview =
@@ -1669,15 +1762,22 @@ export default function App() {
     setIsDataLoading(true);
     setDataError(null);
 
-    const [eventsResult, bucketResult, mannerResult, photoResult] = await Promise.all([
+    const [eventsResult, bucketResult, mannerResult, photoResult, mealResult] = await Promise.all([
       client.from('calendar_events').select('*').order('date').order('time'),
       client.from('bucket_items').select('*').order('id'),
       client.from('manner_reviews').select('*').order('created_at', { ascending: false }),
       client.from('calendar_photos').select('*').order('created_at', { ascending: false }),
+      client.from('meal_entries').select('*').order('date', { ascending: false }).order('created_at', {
+        ascending: false,
+      }),
     ]);
 
     const firstError =
-      eventsResult.error ?? bucketResult.error ?? mannerResult.error ?? photoResult.error;
+      eventsResult.error ??
+      bucketResult.error ??
+      mannerResult.error ??
+      photoResult.error ??
+      mealResult.error;
 
     if (firstError) {
       setDataError(getRemoteErrorMessage(firstError));
@@ -1721,6 +1821,13 @@ export default function App() {
       ((photoResult.data ?? []) as CalendarPhotoRow[])
         .map(normalizeCalendarPhotoRow)
         .filter((photo): photo is CalendarPhoto => Boolean(photo)),
+    );
+    setMealEntries(
+      sortMealEntries(
+        ((mealResult.data ?? []) as MealEntryRow[])
+          .map(normalizeMealEntryRow)
+          .filter((entry): entry is MealEntry => Boolean(entry)),
+      ),
     );
     setBucketList(nextBucketList);
     setMannerReviews(
@@ -2054,6 +2161,262 @@ export default function App() {
       targetProfiles: getNotificationTargetProfiles(),
       title: '캘린더 사진 수정',
       type: 'calendar-photo',
+    });
+  }
+
+  function revokeMealPreviewUrl(url: string | null) {
+    if (url?.startsWith('blob:')) {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function openMealModal() {
+    revokeMealPreviewUrl(mealPhotoPreviewUrl);
+    setEditingMealEntryId(null);
+    setMealDraft({
+      caption: '',
+      date: formatYMD(new Date()),
+      file: null,
+      title: '',
+    });
+    setMealPhotoPreviewUrl(null);
+    setMealError(null);
+    setIsMealModalOpen(true);
+  }
+
+  function openEditMealModal(entry: MealEntry) {
+    if (!currentAccount || entry.uploadedByProfile !== currentAccount.profile) {
+      return;
+    }
+
+    revokeMealPreviewUrl(mealPhotoPreviewUrl);
+    setEditingMealEntryId(entry.id);
+    setMealDraft({
+      caption: entry.caption,
+      date: entry.date,
+      file: null,
+      title: entry.title,
+    });
+    setMealPhotoPreviewUrl(entry.publicUrl);
+    setMealError(null);
+    setIsMealModalOpen(true);
+  }
+
+  function closeMealModal() {
+    revokeMealPreviewUrl(mealPhotoPreviewUrl);
+    setIsMealModalOpen(false);
+    setEditingMealEntryId(null);
+    setMealDraft({
+      caption: '',
+      date: formatYMD(new Date()),
+      file: null,
+      title: '',
+    });
+    setMealPhotoPreviewUrl(null);
+    setMealError(null);
+    setIsMealSaving(false);
+  }
+
+  function selectMealPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null;
+
+    if (!file) {
+      return;
+    }
+
+    if (
+      !file.type.startsWith('image/') &&
+      !/\.(gif|heic|heif|jpe?g|png|webp)$/i.test(file.name)
+    ) {
+      setMealError('이미지 파일만 업로드할 수 있습니다.');
+      event.currentTarget.value = '';
+      return;
+    }
+
+    revokeMealPreviewUrl(mealPhotoPreviewUrl);
+    setMealDraft((currentDraft) => ({ ...currentDraft, file }));
+    setMealPhotoPreviewUrl(URL.createObjectURL(file));
+    setMealError(null);
+  }
+
+  async function saveMealEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const client = getRemoteClient();
+    const caption = mealDraft.caption.trim();
+    const title = mealDraft.title.trim();
+
+    if (!client || !currentAccount) {
+      return;
+    }
+
+    if (!title) {
+      setMealError('음식 제목을 적어주세요.');
+      return;
+    }
+
+    if (!caption) {
+      setMealError('함께 먹은 순간을 짧게 적어주세요.');
+      return;
+    }
+
+    if (!mealDraft.date) {
+      setMealError('식사한 날짜를 선택해 주세요.');
+      return;
+    }
+
+    if (!mealDraft.file && !editingMealEntry) {
+      setMealError('음식 사진을 한 장 선택해 주세요.');
+      return;
+    }
+
+    if (
+      editingMealEntry &&
+      editingMealEntry.uploadedByProfile !== currentAccount.profile
+    ) {
+      setMealError('작성한 사람만 이 기록을 수정할 수 있습니다.');
+      return;
+    }
+
+    setIsMealSaving(true);
+    setMealError(null);
+
+    let uploadedStoragePath: string | null = null;
+
+    try {
+      const id = editingMealEntry?.id ?? Date.now();
+      let storagePath = editingMealEntry?.storagePath ?? '';
+      let publicUrl = editingMealEntry?.publicUrl ?? '';
+
+      if (mealDraft.file) {
+        uploadedStoragePath = `${mealDraft.date}/${id}-${Date.now()}.${getPhotoExtension(
+          mealDraft.file,
+        )}`;
+        const { error: uploadError } = await client.storage
+          .from(MEAL_PHOTO_BUCKET)
+          .upload(uploadedStoragePath, mealDraft.file, {
+            cacheControl: '31536000',
+            contentType: mealDraft.file.type || undefined,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        const {
+          data: { publicUrl: uploadedPublicUrl },
+        } = client.storage.from(MEAL_PHOTO_BUCKET).getPublicUrl(uploadedStoragePath);
+        storagePath = uploadedStoragePath;
+        publicUrl = uploadedPublicUrl;
+      }
+
+      const nextEntry: MealEntry = {
+        id,
+        date: mealDraft.date,
+        caption,
+        title,
+        storagePath,
+        publicUrl,
+        uploadedByUsername: editingMealEntry?.uploadedByUsername ?? currentAccount.username,
+        uploadedByProfile: editingMealEntry?.uploadedByProfile ?? currentAccount.profile,
+        createdAt: editingMealEntry?.createdAt ?? new Date().toISOString(),
+      };
+      const { error: saveError } = await client
+        .from('meal_entries')
+        .upsert(toMealEntryRow(nextEntry));
+
+      if (saveError) {
+        throw saveError;
+      }
+
+      if (
+        uploadedStoragePath &&
+        editingMealEntry?.storagePath &&
+        editingMealEntry.storagePath !== uploadedStoragePath
+      ) {
+        const { error: removePreviousError } = await client.storage
+          .from(MEAL_PHOTO_BUCKET)
+          .remove([editingMealEntry.storagePath]);
+
+        if (removePreviousError) {
+          console.warn('Previous meal photo delete failed', removePreviousError);
+        }
+      }
+
+      setMealEntries((currentEntries) =>
+        sortMealEntries([
+          nextEntry,
+          ...currentEntries.filter((entry) => entry.id !== nextEntry.id),
+        ]),
+      );
+      void publishPushNotification({
+        body: `${PROFILE_META[currentAccount.profile].displayName}님이 ${formatCalendarDateLabel(
+          nextEntry.date,
+        )} 식사 기록을 ${editingMealEntry ? '수정했어요.' : '남겼어요.'}`,
+        tag: `meal-entry-${nextEntry.id}`,
+        targetProfiles: getNotificationTargetProfiles(),
+        title: editingMealEntry ? '식사테이블 수정' : '새 식사테이블 기록',
+        type: 'meal-entry',
+      });
+      setActiveTab('meal');
+      closeMealModal();
+    } catch (error) {
+      if (uploadedStoragePath) {
+        await client.storage.from(MEAL_PHOTO_BUCKET).remove([uploadedStoragePath]);
+      }
+
+      setMealError(
+        error instanceof Error ? error.message : '식사 기록을 저장하지 못했습니다.',
+      );
+      setIsMealSaving(false);
+    }
+  }
+
+  async function deleteMealEntry(entry: MealEntry) {
+    const client = getRemoteClient();
+
+    if (
+      !client ||
+      !currentAccount ||
+      entry.uploadedByProfile !== currentAccount.profile ||
+      !window.confirm('이 식사 기록을 삭제할까요?')
+    ) {
+      return;
+    }
+
+    const { error: deleteError } = await client
+      .from('meal_entries')
+      .delete()
+      .eq('id', entry.id);
+
+    if (deleteError) {
+      setDataError(getRemoteErrorMessage(deleteError));
+      return;
+    }
+
+    const { error: storageError } = await client.storage
+      .from(MEAL_PHOTO_BUCKET)
+      .remove([entry.storagePath]);
+
+    if (storageError) {
+      console.warn('Meal photo storage delete failed', storageError);
+    }
+
+    setMealEntries((currentEntries) =>
+      currentEntries.filter((currentEntry) => currentEntry.id !== entry.id),
+    );
+    setPreviewingMealEntry((currentEntry) =>
+      currentEntry?.id === entry.id ? null : currentEntry,
+    );
+    void publishPushNotification({
+      body: `${PROFILE_META[currentAccount.profile].displayName}님이 ${formatCalendarDateLabel(
+        entry.date,
+      )} 식사 기록을 정리했어요.`,
+      tag: `meal-entry-${entry.id}`,
+      targetProfiles: getNotificationTargetProfiles(),
+      title: '식사테이블 수정',
+      type: 'meal-entry',
     });
   }
 
@@ -3150,7 +3513,7 @@ export default function App() {
 
   return (
     <main className="min-h-screen bg-[#f5efe6] px-4 py-6 text-gray-900">
-      <div className="mx-auto flex min-h-[820px] max-w-md flex-col overflow-hidden rounded-[32px] bg-white shadow-[0_24px_80px_rgba(44,32,20,0.14)]">
+      <div className="mx-auto flex h-[calc(100dvh-24px)] min-h-[640px] max-h-[900px] max-w-md flex-col overflow-hidden rounded-[32px] bg-white shadow-[0_24px_80px_rgba(44,32,20,0.14)]">
         <div className="flex items-center justify-between gap-3 border-b border-[#f1e6d8] px-4 py-5">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-[#9d7b52]">
@@ -3259,7 +3622,7 @@ export default function App() {
           </div>
         ) : null}
 
-        <div className="relative flex-1 overflow-hidden">
+        <div className="relative min-h-0 flex-1 overflow-hidden">
           <div className="h-full overflow-y-auto pb-28">
             {isDataLoading ? (
               <div className="border-b border-[#f1e6d8] bg-blue-50 px-6 py-3 text-sm font-semibold text-blue-600">
@@ -3509,6 +3872,15 @@ export default function App() {
                   </div>
                 </div>
               </>
+            ) : activeTab === 'meal' ? (
+              <MealTable
+                currentProfile={currentAccount?.profile}
+                entries={mealEntries}
+                onAdd={openMealModal}
+                onDelete={(entry) => void deleteMealEntry(entry)}
+                onEdit={openEditMealModal}
+                onPreview={setPreviewingMealEntry}
+              />
             ) : activeTab === 'manner' ? (
               <div className="px-6 pb-10 pt-8">
                 <div className="mb-6 flex items-end justify-between gap-4">
@@ -3766,7 +4138,7 @@ export default function App() {
             )}
           </div>
 
-          <div className="absolute bottom-0 left-0 right-0 grid h-20 grid-cols-3 items-center border-t border-gray-100 bg-white/90 px-6 pb-4 backdrop-blur-lg">
+          <div className="absolute bottom-0 left-0 right-0 grid h-20 grid-cols-4 items-center border-t border-gray-100 bg-white/90 px-2 pb-4 backdrop-blur-lg">
             <button
               type="button"
               onClick={() => setActiveTab('calendar')}
@@ -3774,8 +4146,18 @@ export default function App() {
                 activeTab === 'calendar' ? 'text-[#A594F9]' : 'text-gray-300'
               }`}
             >
-              <CalendarIcon size={24} />
+              <CalendarIcon size={22} />
               <span className="text-[10px] font-bold">캘린더</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('meal')}
+              className={`flex flex-col items-center gap-1 ${
+                activeTab === 'meal' ? 'text-[#A594F9]' : 'text-gray-300'
+              }`}
+            >
+              <UtensilsCrossed size={22} />
+              <span className="whitespace-nowrap text-[10px] font-bold">식사테이블</span>
             </button>
             <button
               type="button"
@@ -3784,7 +4166,7 @@ export default function App() {
                 activeTab === 'manner' ? 'text-[#A594F9]' : 'text-gray-300'
               }`}
             >
-              <Thermometer size={24} />
+              <Thermometer size={22} />
               <span className="text-[10px] font-bold">온도</span>
             </button>
             <button
@@ -3794,7 +4176,7 @@ export default function App() {
                 activeTab === 'bucket' ? 'text-[#A594F9]' : 'text-gray-300'
               }`}
             >
-              <CheckCircle2 size={24} />
+              <CheckCircle2 size={22} />
               <span className="text-[10px] font-bold">버킷리스트</span>
             </button>
           </div>
@@ -3995,6 +4377,175 @@ export default function App() {
                   className="max-h-[76vh] w-full rounded-[24px] object-contain shadow-[0_24px_70px_rgba(0,0,0,0.34)]"
                 />
               </div>
+            </div>
+          ) : null}
+
+          {previewingMealEntry ? (
+            <div
+              className="absolute inset-0 z-50 flex items-center justify-center bg-black/55 px-4 py-8 backdrop-blur-sm"
+              onClick={() => setPreviewingMealEntry(null)}
+            >
+              <div
+                className="relative max-h-full w-full max-w-[390px]"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => setPreviewingMealEntry(null)}
+                  className="absolute right-2 top-2 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm"
+                  aria-label="식사 사진 닫기"
+                >
+                  <X size={18} />
+                </button>
+                <img
+                  src={previewingMealEntry.publicUrl}
+                  alt={`${formatCalendarDateLabel(previewingMealEntry.date)} 식사 확대 사진`}
+                  className="max-h-[76vh] w-full rounded-[24px] object-contain shadow-[0_24px_70px_rgba(0,0,0,0.34)]"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {isMealModalOpen ? (
+            <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/20 px-5 py-8 backdrop-blur-sm">
+              <form
+                className="max-h-[min(82vh,680px)] w-full max-w-[360px] overflow-y-auto rounded-[28px] bg-white p-5 shadow-[0_24px_70px_rgba(44,32,20,0.24)]"
+                onSubmit={saveMealEntry}
+              >
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#9d7b52]">
+                      Meal Note
+                    </p>
+                    <h3 className="mt-1 text-xl font-bold text-[#2f2417]">
+                      {editingMealEntry ? '식사 기록 수정' : '식사 기록 남기기'}
+                    </h3>
+                    <p className="mt-1 text-sm text-[#8d7558]">
+                      {editingMealEntry
+                        ? '사진, 메뉴 이름, 방명록을 한 번에 수정해요.'
+                        : '음식 사진과 짧은 방명록을 함께 남겨요.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeMealModal}
+                    className="rounded-full bg-gray-100 p-2"
+                    aria-label="식사 기록 닫기"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <label className="block cursor-pointer overflow-hidden rounded-[22px] bg-[#F8F5EF]">
+                    {mealPhotoPreviewUrl ? (
+                      <div className="relative">
+                        <img
+                          src={mealPhotoPreviewUrl}
+                          alt="업로드할 음식 미리보기"
+                          className="aspect-[4/3] w-full object-cover"
+                        />
+                        <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-2 text-[11px] font-black text-[#7D6DE0] shadow-sm backdrop-blur-sm">
+                          <Camera size={13} />
+                          사진 바꾸기
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex aspect-[4/3] flex-col items-center justify-center text-[#B8AEA5]">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#D48787] shadow-sm">
+                          <Upload size={20} />
+                        </div>
+                        <span className="mt-3 text-sm font-black">음식 사진 선택</span>
+                        <span className="mt-1 text-[11px] font-medium">앨범에서 한 장을 골라주세요.</span>
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={selectMealPhoto}
+                      className="sr-only"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
+                      음식 제목
+                    </span>
+                    <input
+                      type="text"
+                      required
+                      maxLength={30}
+                      value={mealDraft.title}
+                      onChange={(event) =>
+                        setMealDraft((currentDraft) => ({
+                          ...currentDraft,
+                          title: event.target.value,
+                        }))
+                      }
+                      placeholder="예: 화덕 피자"
+                      className="w-full rounded-2xl bg-[#F8F5EF] px-4 py-3.5 text-sm font-bold text-[#5f5142] outline-none placeholder:text-[#b8aea5]"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
+                      날짜
+                    </span>
+                    <input
+                      type="date"
+                      required
+                      value={mealDraft.date}
+                      onChange={(event) =>
+                        setMealDraft((currentDraft) => ({
+                          ...currentDraft,
+                          date: event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-2xl bg-[#F8F5EF] px-4 py-3.5 text-sm font-bold text-[#5f5142] outline-none"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
+                      방명록
+                    </span>
+                    <textarea
+                      value={mealDraft.caption}
+                      onChange={(event) =>
+                        setMealDraft((currentDraft) => ({
+                          ...currentDraft,
+                          caption: event.target.value,
+                        }))
+                      }
+                      maxLength={300}
+                      placeholder="오늘 먹은 메뉴와 기억하고 싶은 이야기를 적어주세요."
+                      className="min-h-[104px] w-full resize-none rounded-2xl bg-[#F8F5EF] px-4 py-4 text-sm leading-6 text-[#5f5142] outline-none placeholder:text-[#b8aea5]"
+                    />
+                    <span className="mt-1.5 block text-right text-[10px] font-bold text-[#b8aea5]">
+                      {mealDraft.caption.length}/300
+                    </span>
+                  </label>
+
+                  {mealError ? (
+                    <div className="rounded-2xl bg-[#FBF1F1] px-4 py-3 text-sm font-semibold text-[#C06F6F]">
+                      {mealError}
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="submit"
+                    disabled={isMealSaving}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#A594F9] py-4 font-bold text-white disabled:bg-[#ded6c9]"
+                  >
+                    <UtensilsCrossed size={16} />
+                    {isMealSaving
+                      ? '저장 중...'
+                      : editingMealEntry
+                        ? '수정 완료'
+                        : '식사 기록 저장'}
+                  </button>
+                </div>
+              </form>
             </div>
           ) : null}
 

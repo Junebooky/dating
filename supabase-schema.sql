@@ -42,6 +42,25 @@ create unique index if not exists calendar_photos_one_cover_per_date_idx
 on public.calendar_photos (date)
 where is_cover;
 
+create table if not exists public.meal_entries (
+  id bigint primary key,
+  date text not null,
+  title text not null default '',
+  caption text not null default '',
+  storage_path text not null unique,
+  public_url text not null,
+  uploaded_by_username text,
+  uploaded_by_profile text check (uploaded_by_profile in ('boyfriend', 'girlfriend')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.meal_entries
+add column if not exists title text not null default '';
+
+create index if not exists meal_entries_date_created_at_idx
+on public.meal_entries (date desc, created_at desc);
+
 create table if not exists public.bucket_items (
   id bigint primary key,
   text text not null,
@@ -106,6 +125,11 @@ create trigger set_calendar_photos_updated_at
 before update on public.calendar_photos
 for each row execute function public.set_updated_at();
 
+drop trigger if exists set_meal_entries_updated_at on public.meal_entries;
+create trigger set_meal_entries_updated_at
+before update on public.meal_entries
+for each row execute function public.set_updated_at();
+
 drop trigger if exists set_bucket_items_updated_at on public.bucket_items;
 create trigger set_bucket_items_updated_at
 before update on public.bucket_items
@@ -118,6 +142,7 @@ for each row execute function public.set_updated_at();
 
 alter table public.calendar_events enable row level security;
 alter table public.calendar_photos enable row level security;
+alter table public.meal_entries enable row level security;
 alter table public.bucket_items enable row level security;
 alter table public.manner_reviews enable row level security;
 alter table public.push_subscriptions enable row level security;
@@ -163,6 +188,26 @@ with check (
   )
 );
 
+drop policy if exists "couple can manage meal entries" on public.meal_entries;
+create policy "couple can manage meal entries"
+on public.meal_entries
+for all
+to authenticated
+using (
+  (select auth.jwt() ->> 'email') in (
+    'taejun0214@couple.local',
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
+  )
+)
+with check (
+  (select auth.jwt() ->> 'email') in (
+    'taejun0214@couple.local',
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
+  )
+);
+
 drop policy if exists "couple can manage bucket items" on public.bucket_items;
 create policy "couple can manage bucket items"
 on public.bucket_items
@@ -185,6 +230,12 @@ with check (
 
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('calendar-photos', 'calendar-photos', true, 26214400)
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit;
+
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('meal-photos', 'meal-photos', true, 26214400)
 on conflict (id) do update
 set public = excluded.public,
     file_size_limit = excluded.file_size_limit;
@@ -246,6 +297,70 @@ for delete
 to authenticated
 using (
   bucket_id = 'calendar-photos'
+  and (select auth.jwt() ->> 'email') in (
+    'taejun0214@couple.local',
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
+  )
+);
+
+drop policy if exists "couple can read meal photo objects" on storage.objects;
+create policy "couple can read meal photo objects"
+on storage.objects
+for select
+to authenticated
+using (
+  bucket_id = 'meal-photos'
+  and (select auth.jwt() ->> 'email') in (
+    'taejun0214@couple.local',
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
+  )
+);
+
+drop policy if exists "couple can upload meal photo objects" on storage.objects;
+create policy "couple can upload meal photo objects"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'meal-photos'
+  and (select auth.jwt() ->> 'email') in (
+    'taejun0214@couple.local',
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
+  )
+);
+
+drop policy if exists "couple can update meal photo objects" on storage.objects;
+create policy "couple can update meal photo objects"
+on storage.objects
+for update
+to authenticated
+using (
+  bucket_id = 'meal-photos'
+  and (select auth.jwt() ->> 'email') in (
+    'taejun0214@couple.local',
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
+  )
+)
+with check (
+  bucket_id = 'meal-photos'
+  and (select auth.jwt() ->> 'email') in (
+    'taejun0214@couple.local',
+    'yeongjoo0214@couple.local',
+    'yeongju0214@couple.local'
+  )
+);
+
+drop policy if exists "couple can delete meal photo objects" on storage.objects;
+create policy "couple can delete meal photo objects"
+on storage.objects
+for delete
+to authenticated
+using (
+  bucket_id = 'meal-photos'
   and (select auth.jwt() ->> 'email') in (
     'taejun0214@couple.local',
     'yeongjoo0214@couple.local',

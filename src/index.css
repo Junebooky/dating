@@ -59,6 +59,49 @@
     --stacked-accent: #f2e8d9;
     --stacked-bg: #fffdf9;
   }
+
+  .meal-card-reveal {
+    animation: meal-card-reveal 320ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: top center;
+  }
+
+  .meal-view-unfold {
+    animation: meal-view-unfold 380ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: top center;
+  }
+}
+
+@keyframes meal-card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes meal-view-unfold {
+  from {
+    clip-path: inset(0 0 100% 0 round 18px);
+    opacity: 0.35;
+    transform: translateY(-6px);
+  }
+
+  to {
+    clip-path: inset(0 0 0 0 round 18px);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meal-card-reveal,
+  .meal-view-unfold {
+    animation: none;
+  }
 }
 
 body {
