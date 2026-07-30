@@ -47,8 +47,8 @@ create table if not exists public.meal_entries (
   date text not null,
   title text not null default '',
   caption text not null default '',
-  storage_path text not null unique,
-  public_url text not null,
+  storage_path text unique,
+  public_url text,
   uploaded_by_username text,
   uploaded_by_profile text check (uploaded_by_profile in ('boyfriend', 'girlfriend')),
   created_at timestamptz not null default now(),
@@ -57,6 +57,10 @@ create table if not exists public.meal_entries (
 
 alter table public.meal_entries
 add column if not exists title text not null default '';
+
+alter table public.meal_entries
+alter column storage_path drop not null,
+alter column public_url drop not null;
 
 create index if not exists meal_entries_date_created_at_idx
 on public.meal_entries (date desc, created_at desc);

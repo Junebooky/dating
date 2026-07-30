@@ -642,11 +642,7 @@ function sortCalendarPhotos(photos: CalendarPhoto[]) {
 }
 
 function normalizeMealEntryRow(row: MealEntryRow, index: number): MealEntry | null {
-  if (
-    typeof row.date !== 'string' ||
-    typeof row.storage_path !== 'string' ||
-    typeof row.public_url !== 'string'
-  ) {
+  if (typeof row.date !== 'string') {
     return null;
   }
 
@@ -655,8 +651,8 @@ function normalizeMealEntryRow(row: MealEntryRow, index: number): MealEntry | nu
     date: row.date,
     caption: typeof row.caption === 'string' ? row.caption : '',
     title: typeof row.title === 'string' && row.title.trim() ? row.title : '맛있는 한 끼',
-    storagePath: row.storage_path,
-    publicUrl: row.public_url,
+    storagePath: typeof row.storage_path === 'string' ? row.storage_path : null,
+    publicUrl: typeof row.public_url === 'string' ? row.public_url : null,
     uploadedByUsername:
       typeof row.uploaded_by_username === 'string' ? row.uploaded_by_username : undefined,
     uploadedByProfile: isAccountProfile(row.uploaded_by_profile)
@@ -2265,11 +2261,6 @@ export default function App() {
       return;
     }
 
-    if (!mealDraft.file && !editingMealEntry) {
-      setMealError('음식 사진을 한 장 선택해 주세요.');
-      return;
-    }
-
     if (
       editingMealEntry &&
       editingMealEntry.uploadedByProfile !== currentAccount.profile
@@ -2285,8 +2276,8 @@ export default function App() {
 
     try {
       const id = editingMealEntry?.id ?? Date.now();
-      let storagePath = editingMealEntry?.storagePath ?? '';
-      let publicUrl = editingMealEntry?.publicUrl ?? '';
+      let storagePath = editingMealEntry?.storagePath ?? null;
+      let publicUrl = editingMealEntry?.publicUrl ?? null;
 
       if (mealDraft.file) {
         uploadedStoragePath = `${mealDraft.date}/${id}-${Date.now()}.${getPhotoExtension(
@@ -2395,12 +2386,14 @@ export default function App() {
       return;
     }
 
-    const { error: storageError } = await client.storage
-      .from(MEAL_PHOTO_BUCKET)
-      .remove([entry.storagePath]);
+    if (entry.storagePath) {
+      const { error: storageError } = await client.storage
+        .from(MEAL_PHOTO_BUCKET)
+        .remove([entry.storagePath]);
 
-    if (storageError) {
-      console.warn('Meal photo storage delete failed', storageError);
+      if (storageError) {
+        console.warn('Meal photo storage delete failed', storageError);
+      }
     }
 
     setMealEntries((currentEntries) =>
@@ -4380,7 +4373,7 @@ export default function App() {
             </div>
           ) : null}
 
-          {previewingMealEntry ? (
+          {previewingMealEntry?.publicUrl ? (
             <div
               className="absolute inset-0 z-50 flex items-center justify-center bg-black/55 px-4 py-8 backdrop-blur-sm"
               onClick={() => setPreviewingMealEntry(null)}
@@ -4423,7 +4416,7 @@ export default function App() {
                     <p className="mt-1 text-sm text-[#8d7558]">
                       {editingMealEntry
                         ? '사진, 메뉴 이름, 방명록을 한 번에 수정해요.'
-                        : '음식 사진과 짧은 방명록을 함께 남겨요.'}
+                        : '사진 없이도 기록하고 나중에 추가할 수 있어요.'}
                     </p>
                   </div>
                   <button
@@ -4456,6 +4449,9 @@ export default function App() {
                           <Upload size={20} />
                         </div>
                         <span className="mt-3 text-sm font-black">음식 사진 선택</span>
+                        <span className="mt-1 rounded-full bg-white px-2 py-0.5 text-[9px] font-black text-[#B8AEA5]">
+                          선택 사항
+                        </span>
                         <span className="mt-1 text-[11px] font-medium">앨범에서 한 장을 골라주세요.</span>
                       </div>
                     )}

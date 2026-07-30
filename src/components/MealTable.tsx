@@ -3,6 +3,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ImagePlus,
   Pencil,
   Plus,
   Trash2,
@@ -16,8 +17,8 @@ export interface MealEntry {
   createdAt: string;
   date: string;
   id: number;
-  publicUrl: string;
-  storagePath: string;
+  publicUrl: string | null;
+  storagePath: string | null;
   title: string;
   uploadedByProfile?: MealProfile;
   uploadedByUsername?: string;
@@ -295,19 +296,40 @@ export function MealTable({
                     key={`${selectedEntry.date}-${selectedEntry.id}`}
                     className="meal-card-reveal relative mt-4 flex min-h-0 flex-1 flex-col"
                   >
-                  <button
-                    type="button"
-                    onClick={() => onPreview(selectedEntry)}
-                    className="block h-[200px] w-full shrink-0 overflow-hidden rounded-[22px] bg-[#F8F5EF] text-left"
-                    aria-label={`${dateBadge.month} ${dateBadge.day}일 음식 사진 크게 보기`}
-                  >
-                    <img
-                      src={selectedEntry.publicUrl}
-                      alt={`${dateBadge.month} ${dateBadge.day}일 식사`}
-                      className="h-full w-full object-cover"
-                      loading="eager"
-                    />
-                  </button>
+                    {selectedEntry.publicUrl ? (
+                      <button
+                        type="button"
+                        onClick={() => onPreview(selectedEntry)}
+                        className="block h-[200px] w-full shrink-0 overflow-hidden rounded-[22px] bg-[#F8F5EF] text-left"
+                        aria-label={`${dateBadge.month} ${dateBadge.day}일 음식 사진 크게 보기`}
+                      >
+                        <img
+                          src={selectedEntry.publicUrl}
+                          alt={`${dateBadge.month} ${dateBadge.day}일 식사`}
+                          className="h-full w-full object-cover"
+                          loading="eager"
+                        />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onEdit(selectedEntry)}
+                        disabled={!canManage}
+                        className="flex h-[200px] w-full shrink-0 flex-col items-center justify-center overflow-hidden rounded-[22px] bg-[#F8F5EF] text-[#B8AEA5] transition hover:bg-[#F3EEE7] hover:text-[#D48787] disabled:cursor-default disabled:hover:bg-[#F8F5EF] disabled:hover:text-[#B8AEA5]"
+                        aria-label={
+                          canManage
+                            ? `${dateBadge.month} ${dateBadge.day}일 식사 사진 추가`
+                            : `${dateBadge.month} ${dateBadge.day}일 식사 사진 없음`
+                        }
+                      >
+                        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#D48787] shadow-sm">
+                          <ImagePlus size={20} />
+                        </span>
+                        <span className="mt-3 text-xs font-black">
+                          {canManage ? '사진 추가' : '사진 없음'}
+                        </span>
+                      </button>
+                    )}
 
                   <div className="absolute -top-3 left-4 flex h-[72px] w-[58px] flex-col items-center justify-center rounded-[15px] bg-white text-[#2f2417] shadow-[0_10px_24px_rgba(47,36,23,0.17)]">
                     <span className="text-[10px] font-black text-[#9d7b52]">
