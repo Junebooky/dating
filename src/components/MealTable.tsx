@@ -84,6 +84,15 @@ export function MealTable({
     () => new Map(visibleEntries.map((entry) => [entry.date, entry.title])),
     [visibleEntries],
   );
+  const dateEntryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    visibleEntries.forEach((entry) => {
+      counts.set(entry.date, (counts.get(entry.date) ?? 0) + 1);
+    });
+
+    return counts;
+  }, [visibleEntries]);
   const years = useMemo(() => {
     const datesByYear = new Map<number, string[]>();
 
@@ -227,6 +236,7 @@ export function MealTable({
                         <div className="grid grid-cols-3 gap-2">
                           {yearGroup.dates.map((dateKey) => {
                             const badge = formatDateBadge(dateKey);
+                            const entryCount = dateEntryCounts.get(dateKey) ?? 0;
                             const isSelected = dateKey === selectedDate;
 
                             return (
@@ -234,13 +244,18 @@ export function MealTable({
                                 key={dateKey}
                                 type="button"
                                 onClick={() => selectDateFromAllView(dateKey)}
-                                className={`flex h-[76px] min-w-0 flex-col items-center justify-center rounded-[14px] px-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-[0_8px_18px_rgba(47,36,23,0.09)] focus-visible:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E8B6B6]/60 ${
+                                className={`relative flex h-[76px] min-w-0 flex-col items-center justify-center rounded-[14px] px-2 transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-[0_8px_18px_rgba(47,36,23,0.09)] focus-visible:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E8B6B6]/60 ${
                                   isSelected
                                     ? 'bg-[#FBEFEF] text-[#D48787] hover:bg-[#F9E7E7]'
                                     : 'bg-[#F8F5EF] text-[#918679] hover:bg-[#F3EEE7] hover:text-[#6F6458]'
                                 }`}
                                 aria-pressed={isSelected}
                               >
+                                {entryCount > 1 ? (
+                                  <span className="absolute -right-1 -top-1 flex min-w-6 items-center justify-center rounded-full bg-[#A594F9] px-1.5 py-1 text-[8px] font-black leading-none text-white shadow-sm">
+                                    {entryCount}개
+                                  </span>
+                                ) : null}
                                 <span className="whitespace-nowrap text-sm font-black">
                                   {badge.month} {badge.day}일
                                 </span>
@@ -265,6 +280,7 @@ export function MealTable({
                 >
                   {dates.map((dateKey) => {
                     const badge = formatDateBadge(dateKey);
+                    const entryCount = dateEntryCounts.get(dateKey) ?? 0;
                     const isSelected = dateKey === selectedDate;
 
                     return (
@@ -273,13 +289,18 @@ export function MealTable({
                         type="button"
                         onClick={() => selectDate(dateKey)}
                         data-meal-date={dateKey}
-                        className={`flex h-[92px] w-[82px] shrink-0 snap-start flex-col items-center justify-center rounded-[16px] px-2 transition-all duration-300 ${
+                        className={`relative flex h-[92px] w-[82px] shrink-0 snap-start flex-col items-center justify-center rounded-[16px] px-2 transition-all duration-300 ${
                           isSelected
                             ? 'translate-y-0 bg-[#FBEFEF] text-[#D48787] shadow-[0_8px_18px_rgba(212,135,135,0.15)]'
                             : 'translate-y-0.5 bg-[#F8F5EF] text-[#9A8F82]'
                         }`}
                         aria-pressed={isSelected}
                       >
+                        {entryCount > 1 ? (
+                          <span className="absolute right-1.5 top-1.5 flex min-w-6 items-center justify-center rounded-full bg-[#A594F9] px-1.5 py-1 text-[8px] font-black leading-none text-white">
+                            {entryCount}개
+                          </span>
+                        ) : null}
                         <span className="text-[10px] font-black">{badge.month}</span>
                         <span className="my-0.5 text-xl font-black leading-none">{badge.day}</span>
                         <span className="text-[9px] font-bold opacity-65">{badge.year}</span>
@@ -405,8 +426,8 @@ export function MealTable({
                   </div>
                 )}
 
-                <div className="mt-2 flex h-8 shrink-0 items-center justify-between">
-                  {selectedEntries.length > 1 ? (
+                {selectedEntries.length > 1 ? (
+                  <div className="mt-2 flex h-8 shrink-0 items-center justify-between">
                     <>
                       <button
                         type="button"
@@ -441,8 +462,8 @@ export function MealTable({
                         <ChevronRight size={16} />
                       </button>
                     </>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
