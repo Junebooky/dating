@@ -1212,6 +1212,7 @@ export default function App() {
   );
   const [isPhotoUploading, setIsPhotoUploading] = useState(false);
   const [isMealSaving, setIsMealSaving] = useState(false);
+  const [isEventSaving, setIsEventSaving] = useState(false);
   const [editingMealEntryId, setEditingMealEntryId] = useState<number | null>(null);
   const [mealPhotoPreviewUrl, setMealPhotoPreviewUrl] = useState<string | null>(null);
   const [previewingMealEntry, setPreviewingMealEntry] = useState<MealEntry | null>(null);
@@ -1231,6 +1232,7 @@ export default function App() {
   const [mannerReviewError, setMannerReviewError] = useState<string | null>(null);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [mealError, setMealError] = useState<string | null>(null);
+  const [eventError, setEventError] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
   const [weatherData, setWeatherData] = useState<WeatherSnapshot | null>(() =>
@@ -1903,6 +1905,8 @@ export default function App() {
       participantProfiles: currentAccount ? [currentAccount.profile] : [],
     });
     setEditingEventId(null);
+    setEventError(null);
+    setIsEventSaving(false);
     setIsAddModalOpen(true);
   }
 
@@ -1910,6 +1914,8 @@ export default function App() {
     setIsAddModalOpen(false);
     setEditingEventId(null);
     setNewEvent(EMPTY_EVENT_DRAFT);
+    setEventError(null);
+    setIsEventSaving(false);
   }
 
   function openBucketModal() {
@@ -2574,6 +2580,8 @@ export default function App() {
       memo: event.memo,
       participantProfiles: getEventParticipantProfiles(event),
     });
+    setEventError(null);
+    setIsEventSaving(false);
     setIsAddModalOpen(true);
   }
 
@@ -2627,15 +2635,29 @@ export default function App() {
     setIsWeatherPopupOpen(false);
   }
 
-  async function addEvent() {
-    if (!newEvent.title.trim() || !session) {
+  async function addEvent(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+
+    const title = newEvent.title.trim();
+
+    if (!title) {
+      setEventError('일정 제목을 입력해 주세요.');
+      return;
+    }
+
+    if (!session) {
+      setEventError('로그인 상태를 다시 확인해 주세요.');
       return;
     }
 
     const client = getRemoteClient();
     if (!client) {
+      setEventError('Supabase 연결을 확인해 주세요.');
       return;
     }
+
+    setEventError(null);
+    setIsEventSaving(true);
 
     if (editingEventId != null) {
       const targetEvent = events.find((event) => event.id === editingEventId);
@@ -2656,7 +2678,7 @@ export default function App() {
       );
       const nextEvent: CalendarEvent = {
         ...targetEvent,
-        title: newEvent.title.trim(),
+        title,
         time: newEvent.time,
         endDate: normalizeEventEndDate(targetEvent.date, newEvent.endDate),
         importance: newEvent.importance,
@@ -2666,7 +2688,8 @@ export default function App() {
       const { error } = await upsertCalendarEvent(client, nextEvent);
 
       if (error) {
-        setDataError(getRemoteErrorMessage(error));
+        setEventError(getRemoteErrorMessage(error));
+        setIsEventSaving(false);
         return;
       }
 
@@ -2696,7 +2719,7 @@ export default function App() {
       id: Date.now(),
       date: formatYMD(selectedDate),
       endDate: normalizeEventEndDate(formatYMD(selectedDate), newEvent.endDate),
-      title: newEvent.title.trim(),
+      title,
       memo: newEvent.memo.trim(),
       authorUsername: currentAccount?.username ?? session.username,
       authorProfile: currentAccount?.profile,
@@ -2706,7 +2729,8 @@ export default function App() {
     const { error } = await insertCalendarEvent(client, nextEvent);
 
     if (error) {
-      setDataError(getRemoteErrorMessage(error));
+      setEventError(getRemoteErrorMessage(error));
+      setIsEventSaving(false);
       return;
     }
 
@@ -4546,9 +4570,12 @@ export default function App() {
           ) : null}
 
           {isAddModalOpen ? (
-            <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/20 backdrop-blur-sm">
-              <div className="w-full rounded-t-[32px] bg-white p-8">
-                <div className="mb-6 flex items-center justify-between">
+            <div className="fixed inset-0 z-[60] flex touch-pan-y items-center justify-center overflow-hidden bg-black/20 px-4 py-4 backdrop-blur-sm">
+              <form
+                className="flex max-h-[min(calc(100dvh-32px),620px)] w-full min-w-0 max-w-[360px] flex-col overflow-hidden rounded-[28px] bg-white shadow-[0_24px_70px_rgba(44,32,20,0.24)]"
+                onSubmit={addEvent}
+              >
+                <div className="flex shrink-0 items-center justify-between gap-4 px-5 pb-4 pt-5">
                   <div>
                     <h3 className="text-xl font-bold text-[#2f2417]">
                       {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일{' '}
@@ -4571,22 +4598,24 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="space-y-4">
+                <div className="scrollbar-hide min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-contain px-5 pb-4">
+                  <div className="min-w-0 space-y-4">
                   <input
                     type="text"
                     placeholder="일정 제목"
                     value={newEvent.title}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      setEventError(null);
                       setNewEvent((previousEvent) => ({
                         ...previousEvent,
                         title: event.target.value,
-                      }))
-                    }
-                    className="w-full rounded-2xl bg-gray-50 px-4 py-4 outline-none"
+                      }));
+                    }}
+                    className="box-border block w-full min-w-0 max-w-full rounded-2xl bg-gray-50 px-4 py-4 outline-none"
                   />
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="block">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
+                    <label className="block min-w-0">
                       <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
                         시간
                       </span>
@@ -4599,10 +4628,10 @@ export default function App() {
                             time: event.target.value,
                           }))
                         }
-                        className="w-full rounded-2xl bg-gray-50 px-4 py-4 outline-none"
+                        className="box-border block w-full min-w-0 max-w-full rounded-2xl bg-gray-50 px-3 py-4 outline-none"
                       />
                     </label>
-                    <label className="block">
+                    <label className="block min-w-0">
                       <span className="mb-1.5 block text-[10px] font-black uppercase tracking-[0.18em] text-[#9d7b52]">
                         종료일
                       </span>
@@ -4616,7 +4645,7 @@ export default function App() {
                             endDate: event.target.value,
                           }))
                         }
-                        className="w-full rounded-2xl bg-gray-50 px-3 py-4 text-sm outline-none"
+                        className="meal-date-input box-border block w-full min-w-0 max-w-full rounded-2xl bg-gray-50 px-3 py-4 text-sm outline-none"
                       />
                     </label>
                     <select
@@ -4673,18 +4702,30 @@ export default function App() {
                         memo: event.target.value,
                       }))
                     }
-                    className="min-h-[110px] w-full rounded-2xl bg-gray-50 px-4 py-4 outline-none"
+                    className="box-border min-h-[110px] w-full min-w-0 max-w-full resize-none rounded-2xl bg-gray-50 px-4 py-4 outline-none"
                   />
+                  </div>
+                </div>
 
+                <div className="shrink-0 border-t border-[#f1e6d8] bg-white px-5 pb-5 pt-3">
+                  {eventError ? (
+                    <p className="mb-3 rounded-2xl bg-[#FBF1F1] px-4 py-3 text-sm font-semibold text-[#C06F6F]">
+                      {eventError}
+                    </p>
+                  ) : null}
                   <button
-                    type="button"
-                    onClick={addEvent}
-                    className="w-full rounded-2xl bg-[#A594F9] py-4 font-bold text-white"
+                    type="submit"
+                    disabled={isEventSaving}
+                    className="w-full rounded-2xl bg-[#A594F9] py-4 font-bold text-white transition disabled:cursor-wait disabled:bg-[#D8D0F6]"
                   >
-                    {editingEventId != null ? '수정 완료' : '완료'}
+                    {isEventSaving
+                      ? '저장 중...'
+                      : editingEventId != null
+                        ? '수정 완료'
+                        : '완료'}
                   </button>
                 </div>
-              </div>
+              </form>
             </div>
           ) : null}
 
